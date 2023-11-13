@@ -7,7 +7,8 @@
     <script src="../../dist/vue.js"></script>
 </head>
 <body>
-  <div id="app"></div>
+  <div id="p1"></div>
+  <div id="p2"></div>
 </body>
 
 <script>
@@ -18,7 +19,8 @@
   })
 
   effect(() => {
-    document.querySelector('#app').innerHTML = obj.name
+    document.querySelector('#p1').innerHTML = obj.name
+    document.querySelector('#p2').innerHTML = obj.name
   })
 
   setTimeout(() => {
