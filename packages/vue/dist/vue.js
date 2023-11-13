@@ -56,12 +56,25 @@ var Vue = (function (exports) {
     }
     /**
      * 触发依赖
-     * @param target
-     * @param key
+     * @param target WeakMap 的 key
+     * @param key 代理对象的 key，当依赖被触发时，需要根据该 key 获取
      * @param newValue
      */
     function trigger(target, key, newValue) {
-        console.log('trigger: 触发依赖');
+        // 依据 target 获取存储的 map 实例
+        var depsMap = targetMap.get(target);
+        // 如果 map 不存在，则直接 return
+        if (!depsMap) {
+            return;
+        }
+        // 根据key，从depsMap中取出value，该value是一个ReactiveEffect类型的数据
+        var effect = depsMap.get(key);
+        // 如果effect不存在，则直接return
+        if (!effect) {
+            return;
+        }
+        // 执行effect中保存的fn函数
+        effect.fn();
     }
 
     var get = createGetter();
@@ -78,7 +91,7 @@ var Vue = (function (exports) {
         return function set(target, key, value, receiver) {
             var result = Reflect.set(target, key, value, receiver);
             // 依赖触发
-            trigger();
+            trigger(target, key);
             return result;
         };
     }

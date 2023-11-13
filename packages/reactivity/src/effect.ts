@@ -59,10 +59,23 @@ export function track(target: object, key: unknown) {
 
 /**
  * 触发依赖
- * @param target 
- * @param key 
+ * @param target WeakMap 的 key
+ * @param key 代理对象的 key，当依赖被触发时，需要根据该 key 获取
  * @param newValue 
  */
 export function trigger(target: object, key: unknown, newValue: unknown) {
-  console.log('trigger: 触发依赖');
+  // 依据 target 获取存储的 map 实例
+  const depsMap = targetMap.get(target)
+  // 如果 map 不存在，则直接 return
+  if (!depsMap) {
+    return
+  }
+  // 根据key，从depsMap中取出value，该value是一个ReactiveEffect类型的数据
+  const effect = depsMap.get(key) as ReactiveEffect
+  // 如果effect不存在，则直接return
+  if (!effect) {
+    return
+  }
+  // 执行effect中保存的fn函数
+  effect.fn()
 }
