@@ -1,6 +1,20 @@
 var Vue = (function (exports) {
     'use strict';
 
+    var isArray = Array.isArray;
+    var isObject = function (val) {
+        return val !== null && typeof val === 'object';
+    };
+    /**
+     * 对比两个数据是否发生改变
+     * @param value
+     * @param oldValue
+     */
+    var hasChanged = function (value, oldValue) {
+        // Object.is()如果值相同，则返回TRUE，否则返回FALSE
+        return !Object.is(value, oldValue);
+    };
+
     /******************************************************************************
     Copyright (c) Microsoft Corporation.
 
@@ -54,8 +68,6 @@ var Vue = (function (exports) {
         }
         return to.concat(ar || Array.prototype.slice.call(from));
     }
-
-    var isArray = Array.isArray;
 
     /**
      * 依据 effects 生成 dep 实例
@@ -238,9 +250,93 @@ var Vue = (function (exports) {
         proxyMap.set(target, proxy);
         return proxy;
     }
+    var toReactive = function (value) {
+        return isObject(value) ? reactive(value) : value;
+    };
+
+    function ref(value) {
+        return createRef(value, false);
+    }
+    /**
+     * 创建 RefImpl 实例
+     * @param rawValue 原始数据
+     * @param shallow boolean 形数据，表示《浅层的响应性（即：只有 .value 是响应性的）》
+     * @returns
+     */
+    function createRef(rawValue, shallow) {
+        if (isRef(rawValue)) {
+            return rawValue;
+        }
+        return new RefImpl(rawValue, shallow);
+    }
+    var RefImpl = /** @class */ (function () {
+        function RefImpl(value, __v_isShallow) {
+            this.__v_isShallow = __v_isShallow;
+            // 存依赖
+            this.dep = undefined;
+            // 是否为 ref 类型数据的标记
+            this.__v_isRef = true;
+            this._rawValue = value;
+            this._value = __v_isShallow ? value : toReactive(value);
+        }
+        Object.defineProperty(RefImpl.prototype, "value", {
+            /**
+               * get 语法将对象属性绑定到查询该属性时将被调用的函数。
+               * 即：xxx.value 时触发该函数
+               */
+            get: function () {
+                trackRefValue(this);
+                return this._value;
+            },
+            set: function (newVal) {
+                /**
+                     * newVal 为新数据
+                     * this._rawValue 为旧数据（原始数据）
+                     * 对比两个数据是否发生了变化
+                     */
+                if (hasChanged(newVal, this._rawValue)) {
+                    // 改变原始值
+                    this._rawValue = newVal;
+                    // 更新 .value 的值
+                    this._value = toReactive(newVal);
+                    triggerRefValue(this);
+                }
+            },
+            enumerable: false,
+            configurable: true
+        });
+        return RefImpl;
+    }());
+    /**
+     * 收集依赖
+     * @param ref
+     */
+    function trackRefValue(ref) {
+        if (activeEffect) {
+            trackEffects(ref.dep || (ref.dep = createDep()));
+        }
+    }
+    /**
+     * 为 ref 的 value 进行触发依赖工作
+     */
+    function triggerRefValue(ref) {
+        if (ref.dep) {
+            triggerEffects(ref.dep);
+        }
+    }
+    /**
+     * 是否为ref
+     * @param r
+     * @returns
+     */
+    function isRef(r) {
+        // !!双感叹号的作用是转为布尔值
+        return !!(r && r.__v_isRef === true);
+    }
 
     exports.effect = effect;
     exports.reactive = reactive;
+    exports.ref = ref;
 
     Object.defineProperty(exports, '__esModule', { value: true });
 
