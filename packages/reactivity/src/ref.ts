@@ -68,6 +68,8 @@ class RefImpl<T> {
  * @param ref 
  */
 export function trackRefValue(ref) {
+  console.log("activeEffect", activeEffect);
+  
   if (activeEffect) {
     trackEffects(ref.dep || (ref.dep = createDep()))
   }
@@ -77,6 +79,8 @@ export function trackRefValue(ref) {
  * 为 ref 的 value 进行触发依赖工作
  */
 export function triggerRefValue(ref) {
+  console.log("ref", ref);
+  
   if (ref.dep) {
     triggerEffects(ref.dep)
   }

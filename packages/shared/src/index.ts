@@ -13,3 +13,7 @@ export const hasChanged = (value: any, oldValue: any): boolean => {
   // Object.is()如果值相同，则返回TRUE，否则返回FALSE
   return !Object.is(value, oldValue)
 }
+
+export const isFunction = (val: unknown): val is Function => {
+  return typeof val === 'function'
+}
