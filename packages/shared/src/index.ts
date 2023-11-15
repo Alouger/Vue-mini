@@ -25,3 +25,7 @@ export const isString = (val: unknown): val is string => {
 export const extend = Object.assign
 
 export const EMPTY_OBJ: { readonly [key: string]: any} = {}
+
+// 以on开头的
+const onRE = /^on[^a-z]/
+export const isOn = (key: string) => onRE.test(key)

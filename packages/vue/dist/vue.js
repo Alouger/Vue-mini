@@ -22,6 +22,9 @@ var Vue = (function (exports) {
     };
     var extend = Object.assign;
     var EMPTY_OBJ = {};
+    // 以on开头的
+    var onRE = /^on[^a-z]/;
+    var isOn = function (key) { return onRE.test(key); };
 
     /******************************************************************************
     Copyright (c) Microsoft Corporation.
@@ -580,8 +583,8 @@ var Vue = (function (exports) {
     }
 
     var Fragment = Symbol('Fragment');
-    var Text = Symbol('Text');
-    var Comment = Symbol('Comment');
+    var Text$1 = Symbol('Text');
+    var Comment$1 = Symbol('Comment');
     function isVNode(value) {
         return value ? value.__v_isVNode === true : false;
     }
@@ -683,15 +686,166 @@ var Vue = (function (exports) {
         }
     }
 
-    exports.Comment = Comment;
+    var doc = document;
+    var nodeOps = {
+        /**
+         * 插入指定元素到指定位置
+         */
+        insert: function (child, parent, anchor) {
+            parent.insertBefore(child, anchor || null);
+        },
+        /**
+         * 创建指定 Element
+         */
+        createElement: function (tag) {
+            var el = doc.createElement(tag);
+            return el;
+        },
+        /**
+         * 为指定的 element 设置 textContent
+         */
+        setElementText: function (el, text) {
+            el.textContent = text;
+        }
+    };
+
+    /**
+     * 为 class 打补丁
+     */
+    function patchClass(el, value) {
+        if (value === null) {
+            el.removeAttribute('class');
+        }
+        else {
+            el.className = value;
+        }
+    }
+
+    var patchProp = function (el, key, prevValue, nextValue) {
+        // 根据不同的prop做不同的处理
+        if (key === 'class') {
+            patchClass(el, nextValue);
+        }
+        else if (key === 'style') ;
+        else if (isOn(key)) ;
+        else ;
+    };
+
+    /**
+     * 对外暴露的创建渲染器的方法
+     */
+    // RendererOptions里面是一些兼容性的方法
+    function createRenderer(options) {
+        return baseCreateRenderer(options);
+    }
+    /**
+     * 生成 renderer 渲染器
+     * @param options 兼容性操作配置对象
+     * @returns
+     */
+    function baseCreateRenderer(options) {
+        /**
+        * 解构 options，获取所有的兼容性方法。一系列用于操作DOM的辅助函数，如insert、remove、patch等。这些函数负责实际的DOM操作，用于将虚拟DOM转换为实际的DOM，并进行插入、删除、更新等操作
+        */
+        var hostInsert = options.insert, hostPatchProp = options.patchProp, hostCreateElement = options.createElement, hostSetElementText = options.setElementText;
+        var processElement = function (oldVNode, newVNode, container, anchor) {
+            // 根据旧节点是否存在来判断我们当前是要进行挂载操作还是更新操作
+            if (oldVNode === null) {
+                // 为空，进行挂载
+                mountElement(newVNode, container, anchor);
+            }
+        };
+        /**
+         * element 的挂载操作
+         */
+        var mountElement = function (vnode, container, anchor) {
+            // 执行挂载本质上就是创建element，设置文本子节点，处理props插入
+            var type = vnode.type, props = vnode.props, shapeFlag = vnode.shapeFlag;
+            // 1. 创建element, 这里的el和vnode中的el进行了浅绑定。这里传入的type是虚拟节点vnode的type，假设vnode的type是div，那么这里hostCreateElement返回的也是div标签，所以最终el等于div标签，vnode.el也等于div标签
+            // 源码里写的是 el = vnode.el = hostCreateElement(...), 相当于是让el和vnode.el进行浅拷贝，然后最终的值等于hostCreateElement()
+            var el = (vnode.el = hostCreateElement(type));
+            // 如果能按位匹配上TEXT_CHILDREN
+            // dubug时shapeFlag = 9, 二进制为00000000 00000000 00000000 00001001
+            // 而ShapeFlags.TEXT_CHILDREN = 8, 二进制为00000000 00000000 00000000 00001000
+            // 两者进行与运算结果为00000000 00000000 00000000 00001000，十进制为8，不为0，所以if(8)判定为true
+            if (shapeFlag & 8 /* ShapeFlags.TEXT_CHILDREN */) {
+                // 2. 设置文本
+                // host开头的本质上都是我们传递过来的这个nodeOps里面这个浏览器相关的函数
+                hostSetElementText(el, vnode.children);
+            }
+            // 3. 设置props
+            if (props) {
+                for (var key in props) {
+                    hostPatchProp(el, key, null, props[key]);
+                }
+            }
+            // 4. 插入
+            hostInsert(el, container, anchor);
+        };
+        var patch = function (oldVNode, newVNode, container, anchor) {
+            if (anchor === void 0) { anchor = null; }
+            if (oldVNode === newVNode) {
+                return;
+            }
+            var type = newVNode.type, shapeFlag = newVNode.shapeFlag;
+            switch (type) {
+                case Text:
+                    break;
+                case Comment:
+                    break;
+                case Fragment:
+                    break;
+                default:
+                    // 如果按位进行与运算能匹配到ELEMENT
+                    // debug时传入的shapeFlag为9，二进制为00000000 00000000 00000000 00001001
+                    // 同时ShapeFlags.ELEMENT = 1, 二进制为00000000 00000000 00000000 00000001，
+                    // 进行与运算就是00000000 00000000 00000000 00000001，十进制就是1，那么if(1)就判定为true
+                    if (shapeFlag & 1 /* ShapeFlags.ELEMENT */) {
+                        processElement(oldVNode, newVNode, container, anchor);
+                    }
+            }
+        };
+        // 源码中这里是有第三个参数，也就是isSVG，但这里我们不考虑这种情况
+        var render = function (vnode, container) {
+            if (vnode === null) ;
+            else {
+                // 如果不为空，我们就执行一个打补丁的操作（包括了挂载和更新）
+                // 第一个参数是旧节点，如果没有的话就传null
+                console.log(container);
+                patch(container._vnode || null, vnode, container);
+            }
+            container._vnode = vnode;
+        };
+        return {
+            render: render
+        };
+    }
+
+    var rendererOptions = extend({ patchProp: patchProp }, nodeOps);
+    var renderer;
+    function ensureRenderer() {
+        // createRenderer返回的值其实就是baseCreateRender返回的值, baseCreateRender返回的值就包含了render函数
+        return renderer || (renderer = createRenderer(rendererOptions));
+    }
+    var render = function () {
+        var _a;
+        var args = [];
+        for (var _i = 0; _i < arguments.length; _i++) {
+            args[_i] = arguments[_i];
+        }
+        (_a = ensureRenderer()).render.apply(_a, __spreadArray([], __read(args), false));
+    };
+
+    exports.Comment = Comment$1;
     exports.Fragment = Fragment;
-    exports.Text = Text;
+    exports.Text = Text$1;
     exports.computed = computed;
     exports.effect = effect;
     exports.h = h;
     exports.queuePreFlushCb = queuePreFlushCb;
     exports.reactive = reactive;
     exports.ref = ref;
+    exports.render = render;
     exports.watch = watch;
 
     Object.defineProperty(exports, '__esModule', { value: true });
