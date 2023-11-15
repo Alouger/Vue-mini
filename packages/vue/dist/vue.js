@@ -17,6 +17,8 @@ var Vue = (function (exports) {
     var isFunction = function (val) {
         return typeof val === 'function';
     };
+    var extend = Object.assign;
+    var EMPTY_OBJ = {};
 
     /******************************************************************************
     Copyright (c) Microsoft Corporation.
@@ -88,13 +90,19 @@ var Vue = (function (exports) {
      * 		2. `value`：指定对象的指定属性的 执行函数
      */
     var targetMap = new WeakMap();
-    function effect(fn) {
+    function effect(fn, options) {
         var _effect = new ReactiveEffect(fn);
-        // 拿到effect实例后执行run函数
-        // 之所以在这里直接执行run函数，是为了完成第一次fn函数的执行
-        // 当一个普通的函数 fn() 被 effect() 包裹之后，就会变成一个响应式的 effect 函数，而 fn() 也会被立即执行一次。
-        // 由于在 fn() 里面有引用到 Proxy 对象的属性，所以这一步会触发对象的 getter，从而启动依赖收集。
-        _effect.run();
+        if (options) {
+            // 合并_effect和options，当options中包含调度器的话，通过extend函数，_effect也会包含调度器
+            extend(_effect, options);
+        }
+        if (!options || !options.lazy) {
+            // 拿到effect实例后执行run函数
+            // 之所以在这里直接执行run函数，是为了完成第一次fn函数的执行
+            // 当一个普通的函数 fn() 被 effect() 包裹之后，就会变成一个响应式的 effect 函数，而 fn() 也会被立即执行一次。
+            // 由于在 fn() 里面有引用到 Proxy 对象的属性，所以这一步会触发对象的 getter，从而启动依赖收集。
+            _effect.run();
+        }
     }
     var activeEffect;
     var ReactiveEffect = /** @class */ (function () {
@@ -110,6 +118,7 @@ var Vue = (function (exports) {
             activeEffect = this;
             return this.fn();
         };
+        ReactiveEffect.prototype.stop = function () { };
         return ReactiveEffect;
     }());
     /**
@@ -275,6 +284,8 @@ var Vue = (function (exports) {
         }
         // 未被代理则生成 proxy 实例
         var proxy = new Proxy(target, baseHandlers);
+        // 新增Reactive标识
+        proxy["__v_isReactive" /* ReactiveFlags.IS_REACTIVE */] = true;
         // 缓存代理对象
         proxyMap.set(target, proxy);
         return proxy;
@@ -282,6 +293,9 @@ var Vue = (function (exports) {
     var toReactive = function (value) {
         return isObject(value) ? reactive(value) : value;
     };
+    function isReactive(value) {
+        return !!(value && value["__v_isReactive" /* ReactiveFlags.IS_REACTIVE */]);
+    }
 
     function ref(value) {
         return createRef(value, false);
@@ -409,10 +423,140 @@ var Vue = (function (exports) {
         return cRef;
     }
 
+    // 对应promise的pending状态，是一个 标记，表示 promise 进入 pending 状态
+    var isFlushPending = false;
+    var resolvedPromise = Promise.resolve();
+    // 待执行的任务队列
+    var pendingPreFlushCbs = [];
+    // 队列预处理函数
+    function queuePreFlushCb(cb) {
+        queueCb(cb, pendingPreFlushCbs);
+    }
+    // 队列处理函数
+    function queueCb(cb, pendingQueue) {
+        // 将所有的回调函数，放入队列中
+        pendingQueue.push(cb);
+        // 负责依次执行队列中的函数
+        queueFlush();
+    }
+    // 依次处理队列中执行函数
+    function queueFlush() {
+        // 只有pending为false才执行, 这个执行是一个异步任务
+        if (!isFlushPending) {
+            isFlushPending = true;
+            // 把当前的整个任务队列的执行扔到微任务里面，避免通过主线任务执行，扔到微任务中的目的就是为了控制执行规则
+            // 通过 Promise.resolve().then() 这样一种 异步微任务的方式 执行了 flushJobs 函数， flushJobs 是一个 异步函数，它会等到 同步任务执行完成之后 被触发
+            resolvedPromise.then(flushJobs);
+        }
+    }
+    // 扔进then方法的回调函数，这个是真正去处理队列的函数
+    function flushJobs() {
+        // 开始处理队列了，就要把pending变成false
+        isFlushPending = false;
+        flushPreFlushCbs();
+    }
+    // 循环去进行队列的处理，依次处理队列中的任务
+    function flushPreFlushCbs() {
+        if (pendingPreFlushCbs.length) {
+            // 用Set去重，这里类似于一个深拷贝
+            var activePreFlushCbs = __spreadArray([], __read(new Set(pendingPreFlushCbs)), false);
+            // 清空旧数据, 把pendingPreFlushCbs置空，则下一次就不会进入这个if语句框里了
+            pendingPreFlushCbs.length = 0;
+            // 循环处理
+            for (var i = 0; i < activePreFlushCbs.length; i++) {
+                activePreFlushCbs[i]();
+            }
+        }
+    }
+
+    /**
+     * 指定的 watch 函数
+     * @param source 监听的响应性数据
+     * @param cb 回调函数
+     * @param options 配置对象
+     * @returns
+     */
+    function watch(source, cb, options) {
+        return doWatch(source, cb, options);
+    }
+    // 大致原理:收集source中响应式元素包装成getter,在new ReactiveEffect中传递调用run方法执行getter就会收集到依赖,然后当触发依赖更新的时候就会调用scheduler,在根据flush参数,选择同步执行scheduler还是加入调度器
+    function doWatch(source, cb, _a) {
+        var _b = _a === void 0 ? EMPTY_OBJ : _a, immediate = _b.immediate, deep = _b.deep;
+        // 所有的监听数据源都会被包装成getter,这是因为底层都是调用reactivity库的watchEffect,而第一个参数必须是函数,当调用这个函数访问到的变量都会收集依赖。所以如果当前元素为reactive元素的时候需要遍历这个元素的所有值以便所有的变量都能收集到对应的依赖。
+        // 触发 getter 的指定函数
+        var getter;
+        // 判断 source 的数据类型
+        if (isReactive(source)) {
+            // 指定 getter
+            getter = function () { return source; };
+            // 深度
+            deep = true;
+        }
+        else {
+            getter = function () { };
+        }
+        // 存在回调函数和deep
+        if (cb && deep) {
+            // TODO
+            var baseGetter_1 = getter; // 浅拷贝，baseGetter和getter都指向相同的内存空间
+            // getter = () => baseGetter()
+            // traverse就是在循环source里面所有的getter行为，完成对应的依赖收集
+            getter = function () { return traverse(baseGetter_1()); };
+        }
+        // 旧值
+        var oldValue = {};
+        // job 执行方法，job执行一次，说明watch触发一次
+        // 这个job代表的是要传递给Vue调度器的任务,所以这是在创建一个调度器任务。
+        // 同时还需要注意这个job是监听的变量发生了改变后才会调用
+        var job = function () {
+            // 如果存在cb,那么会先调用getter函数获取最新的value,然后再调用cb
+            if (cb) {
+                // watch(source, cb)
+                // effect.run(), 本质上是fn函数的执行，具体而言就是() => traverse(baseGetter())的执行，注意此时activeEffect会被改成这个ReactiveEffect对象
+                var newValue = effect.run();
+                if (deep || hasChanged(newValue, oldValue)) {
+                    cb(newValue, oldValue);
+                    oldValue = newValue;
+                }
+            }
+        };
+        // 调度器
+        var scheduler = function () { return queuePreFlushCb(job); };
+        // 最终getter和scheduler都得到了。他们会作为reactiveEffect类的两个参数。第一个为监听的getter函数,在这里面访问的值都会收集到依赖,当这些监听的值发生改变的时候就会调用schgeduler。
+        var effect = new ReactiveEffect(getter, scheduler);
+        if (cb) {
+            if (immediate) {
+                job();
+            }
+            else {
+                oldValue = effect.run();
+            }
+        }
+        else {
+            effect.run();
+        }
+        return function () {
+            effect.stop();
+        };
+    }
+    function traverse(value) {
+        // 对于当前value的类型只可能是两种类型：对象或非对象
+        if (!isObject(value)) {
+            return value;
+        }
+        // 通过上面的if判断，这里value说明已经是object类型了，我们再用as进行类型强转一下
+        for (var key in value) {
+            traverse(value[key]);
+        }
+        return value;
+    }
+
     exports.computed = computed;
     exports.effect = effect;
+    exports.queuePreFlushCb = queuePreFlushCb;
     exports.reactive = reactive;
     exports.ref = ref;
+    exports.watch = watch;
 
     Object.defineProperty(exports, '__esModule', { value: true });
 

@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <script src="../../dist/vue.js"></script>
+</head>
+<body>
+  <div id="p1"></div>
+  <div id="p2"></div>
+</body>
+
+<script>
+  const { reactive, effect } = Vue
+
+  const obj = reactive({
+    count: 1
+  })
+
+  effect(() => {
+    console.log(obj.count);
+  }, {
+    scheduler() {
+      // 相当于把打印放到一个异步任务里面
+      setTimeout(() => {
+        console.log(obj.count);
+      })
+    }
+  })
+
+  obj.count = 2
+  
+  console.log('代码结束');
+  
+</script>
+
+</html>

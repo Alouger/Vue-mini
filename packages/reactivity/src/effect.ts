@@ -1,4 +1,4 @@
-import { isArray } from "@vue/shared"
+import { extend, isArray } from "@vue/shared"
 import { Dep, createDep } from "./dep"
 import { ComputedRefImpl } from "./computed"
 
@@ -14,13 +14,26 @@ type KeyToDepMap = Map<any, Dep>
  */
 const targetMap = new WeakMap<any, KeyToDepMap>()
 
-export function effect<T = any>(fn: () => T) {
+export interface ReactiveEffectOptions {
+  lazy?: boolean
+  scheduler?: EffectScheduler
+}
+
+export function effect<T = any>(fn: () => T, options?: ReactiveEffectOptions) {
   const _effect = new ReactiveEffect(fn)
-  // 拿到effect实例后执行run函数
-  // 之所以在这里直接执行run函数，是为了完成第一次fn函数的执行
-  // 当一个普通的函数 fn() 被 effect() 包裹之后，就会变成一个响应式的 effect 函数，而 fn() 也会被立即执行一次。
-  // 由于在 fn() 里面有引用到 Proxy 对象的属性，所以这一步会触发对象的 getter，从而启动依赖收集。
-  _effect.run()
+
+  if (options) {
+    // 合并_effect和options，当options中包含调度器的话，通过extend函数，_effect也会包含调度器
+    extend(_effect, options)
+  }
+
+  if (!options || !options.lazy) {
+    // 拿到effect实例后执行run函数
+    // 之所以在这里直接执行run函数，是为了完成第一次fn函数的执行
+    // 当一个普通的函数 fn() 被 effect() 包裹之后，就会变成一个响应式的 effect 函数，而 fn() 也会被立即执行一次。
+    // 由于在 fn() 里面有引用到 Proxy 对象的属性，所以这一步会触发对象的 getter，从而启动依赖收集。
+    _effect.run()
+  }
 }
 
 export let activeEffect: ReactiveEffect | undefined
@@ -38,6 +51,8 @@ export class ReactiveEffect<T = any> {
     activeEffect = this
     return this.fn()
   }
+
+  stop() {}
 }
 
 /**
