@@ -731,7 +731,8 @@ var Vue = (function (exports) {
          */
         setText: function (node, text) {
             node.nodeValue = text;
-        }
+        },
+        createComment: function (text) { return doc.createComment(text); }
     };
 
     /**
@@ -897,7 +898,19 @@ var Vue = (function (exports) {
         /**
         * 解构 options，获取所有的兼容性方法。一系列用于操作DOM的辅助函数，如insert、remove、patch等。这些函数负责实际的DOM操作，用于将虚拟DOM转换为实际的DOM，并进行插入、删除、更新等操作
         */
-        var hostInsert = options.insert, hostPatchProp = options.patchProp, hostCreateElement = options.createElement, hostSetElementText = options.setElementText, hostRemove = options.remove, hostCreateText = options.createText, hostSetText = options.setText;
+        var hostInsert = options.insert, hostPatchProp = options.patchProp, hostCreateElement = options.createElement, hostSetElementText = options.setElementText, hostRemove = options.remove, hostCreateText = options.createText, hostSetText = options.setText, hostCreateComment = options.createComment;
+        var processCommentNode = function (oldVNode, newVNode, container, anchor) {
+            // 不存在旧的节点，则为 挂载 操作
+            if (oldVNode == null) {
+                // 生成节点
+                newVNode.el = hostCreateComment(newVNode.children);
+                // 挂载
+                hostInsert(newVNode.el, container, anchor);
+            }
+            else {
+                newVNode.el = oldVNode.el;
+            }
+        };
         /**
          * Text 的打补丁操作
          */
@@ -1042,6 +1055,7 @@ var Vue = (function (exports) {
                     processText(oldVNode, newVNode, container, anchor);
                     break;
                 case Comment:
+                    processCommentNode(oldVNode, newVNode, container, anchor);
                     break;
                 case Fragment:
                     break;
