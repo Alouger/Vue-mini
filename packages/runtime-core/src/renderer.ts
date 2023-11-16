@@ -1,6 +1,7 @@
 import { ShapeFlags } from "packages/shared/src/shapeFlags"
-import { Fragment, isSameVNodeType } from "./vnode"
-import { EMPTY_OBJ } from "@vue/shared"
+import { Fragment, isSameVNodeType, normalizeChildren } from "./vnode"
+import { EMPTY_OBJ, isString } from "@vue/shared"
+import { normalizeVNode } from "./componentRenderUtils"
 
 export interface RendererOptions {
   // patchProp是为指定的element的props打补丁
@@ -57,6 +58,17 @@ function baseCreateRenderer(options: RendererOptions): any {
     setText: hostSetText,
     createComment: hostCreateComment
   } = options
+
+  /**
+   * Fragment 的打补丁操作
+   */
+  const processFragment = (oldVNode, newVNode, container, anchor) => {
+    if (oldVNode == null) {
+      mountChildren(newVNode.children, container, anchor)
+    } else {
+      patchChildren(oldVNode, newVNode, container, anchor)
+    }
+  }
 
   /**
    * Comment 的打补丁操作
@@ -149,6 +161,22 @@ function baseCreateRenderer(options: RendererOptions): any {
 
     patchProps(el, newVNode, oldProps, newProps)
   }
+  /**
+   * 挂载子节点
+   */
+  const mountChildren = (children, container, anchor) => {
+    if (isString(children)) {
+      // 把字符串转成了数组
+      children = children.split('')
+    }
+    // 对children的循环渲染
+    for (let i = 0; i < children.length; i++) {
+      const child = (children[i] = normalizeVNode(children[i]))
+      // 渲染
+      patch(null, child, container, anchor)
+    }
+  }
+
    /**
     * 为子节点打补丁
     */
@@ -245,6 +273,7 @@ function baseCreateRenderer(options: RendererOptions): any {
         processCommentNode(oldVNode, newVNode, container, anchor)
         break
       case Fragment:
+        processFragment(oldVNode, newVNode, container, anchor)
         break
       default:
         // 如果按位进行与运算能匹配到ELEMENT

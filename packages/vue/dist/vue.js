@@ -732,6 +732,9 @@ var Vue = (function (exports) {
         setText: function (node, text) {
             node.nodeValue = text;
         },
+        /**
+         * 创建 Comment 节点
+         */
         createComment: function (text) { return doc.createComment(text); }
     };
 
@@ -882,6 +885,23 @@ var Vue = (function (exports) {
         return key in el;
     }
 
+    // 生成标准化的VNode
+    function normalizeVNode(child) {
+        // 如果当前child已经是一个VNode了, 直接return child
+        if (typeof child === 'object') {
+            return cloneIfMounted(child);
+        }
+        else {
+            return createVNode(Text, null, String(child));
+        }
+    }
+    /**
+     * clone VNode
+     */
+    function cloneIfMounted(child) {
+        return child;
+    }
+
     /**
      * 对外暴露的创建渲染器的方法
      */
@@ -899,6 +919,20 @@ var Vue = (function (exports) {
         * 解构 options，获取所有的兼容性方法。一系列用于操作DOM的辅助函数，如insert、remove、patch等。这些函数负责实际的DOM操作，用于将虚拟DOM转换为实际的DOM，并进行插入、删除、更新等操作
         */
         var hostInsert = options.insert, hostPatchProp = options.patchProp, hostCreateElement = options.createElement, hostSetElementText = options.setElementText, hostRemove = options.remove, hostCreateText = options.createText, hostSetText = options.setText, hostCreateComment = options.createComment;
+        /**
+         * Fragment 的打补丁操作
+         */
+        var processFragment = function (oldVNode, newVNode, container, anchor) {
+            if (oldVNode == null) {
+                mountChildren(newVNode.children, container, anchor);
+            }
+            else {
+                patchChildren(oldVNode, newVNode, container);
+            }
+        };
+        /**
+         * Comment 的打补丁操作
+         */
         var processCommentNode = function (oldVNode, newVNode, container, anchor) {
             // 不存在旧的节点，则为 挂载 操作
             if (oldVNode == null) {
@@ -908,6 +942,8 @@ var Vue = (function (exports) {
                 hostInsert(newVNode.el, container, anchor);
             }
             else {
+                // 无更新
+                // vue3中并不支持注释的动态更新
                 newVNode.el = oldVNode.el;
             }
         };
@@ -978,6 +1014,21 @@ var Vue = (function (exports) {
             // 更新子节点
             patchChildren(oldVNode, newVNode, el);
             patchProps(el, newVNode, oldProps, newProps);
+        };
+        /**
+         * 挂载子节点
+         */
+        var mountChildren = function (children, container, anchor) {
+            if (isString(children)) {
+                // 把字符串转成了数组
+                children = children.split('');
+            }
+            // 对children的循环渲染
+            for (var i = 0; i < children.length; i++) {
+                var child = (children[i] = normalizeVNode(children[i]));
+                // 渲染
+                patch(null, child, container, anchor);
+            }
         };
         /**
          * 为子节点打补丁
@@ -1058,6 +1109,7 @@ var Vue = (function (exports) {
                     processCommentNode(oldVNode, newVNode, container, anchor);
                     break;
                 case Fragment:
+                    processFragment(oldVNode, newVNode, container, anchor);
                     break;
                 default:
                     // 如果按位进行与运算能匹配到ELEMENT

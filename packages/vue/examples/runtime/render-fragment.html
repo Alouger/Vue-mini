@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <script src="../../dist/vue.js"></script>
+    <style>
+      .active {
+        color: #00ff00
+      }
+    </style>
+</head>
+<body>
+  <div id="app"></div>
+</body>
+
+<script>
+  const { h, render, Fragment } = Vue
+
+  const vnode = h(Fragment, 'hello world')
+  // 挂载
+  render(vnode, document.querySelector('#app'))
+
+  // 延迟两秒，生成新的 vnode，进行更新操作
+  setTimeout(() => {
+    const vnode2 = h(Fragment, '你好，世界')
+    render(vnode2, document.querySelector('#app'))
+  }, 2000)
+</script>
+
+</html>
