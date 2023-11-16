@@ -736,6 +736,23 @@ var Vue = (function (exports) {
         }
     }
 
+    function patchDOMProp(el, key, value) {
+        try {
+            el[key] = value;
+        }
+        catch (e) { }
+    }
+
+    function patchAttr(el, key, value) {
+        // value有时存在有时不存在，所以要判断下
+        if (value === null) {
+            el.removeAttribute(key);
+        }
+        else {
+            el.setAttribute(key, value);
+        }
+    }
+
     var patchProp = function (el, key, prevValue, nextValue) {
         // 根据不同的prop做不同的处理
         if (key === 'class') {
@@ -743,8 +760,32 @@ var Vue = (function (exports) {
         }
         else if (key === 'style') ;
         else if (isOn(key)) ;
-        else ;
+        else if (shouldSetAsProp(el, key)) { // shouldSetAsProp 用来匹配DOM Properties
+            // 通过 DOM Properties 指定
+            patchDOMProp(el, key, nextValue);
+        }
+        else {
+            // 其他属性
+            patchAttr(el, key, nextValue);
+        }
     };
+    function shouldSetAsProp(el, key) {
+        // 源码中这里写了一大堆边缘情况，我们这里进行简化
+        if (key === 'form') {
+            // 为什么返回false? 因为对于form表单元素，它是只读的
+            return false;
+        }
+        if (key === 'list' && el.tagName === 'INPUT') {
+            // 返回false是因为对于input和list，他们必须通过HTML Attribute的方式进行设定
+            return false;
+        }
+        if (key === 'type' && el.tagName === 'TEXTAREA') {
+            // 返回false是因为对于type和TEXTAREA，他们必须通过HTML Attribute的方式进行设定
+            return false;
+        }
+        // 只要key是props的就返回true
+        return key in el;
+    }
 
     /**
      * 对外暴露的创建渲染器的方法
