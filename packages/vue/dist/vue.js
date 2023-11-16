@@ -905,7 +905,13 @@ var Vue = (function (exports) {
         // 源码中这里是有第三个参数，也就是isSVG，但这里我们不考虑这种情况
         var render = function (vnode, container) {
             // debugger
-            if (vnode === null) ;
+            if (vnode === null) {
+                // 如果vnode为空，我们执行卸载操作
+                // TODO: 卸载
+                if (container._vnode) {
+                    unmount(container._vnode);
+                }
+            }
             else {
                 // 如果不为空，我们就执行一个打补丁的操作（包括了挂载和更新）
                 // 第一个参数是旧节点，如果没有的话就传null

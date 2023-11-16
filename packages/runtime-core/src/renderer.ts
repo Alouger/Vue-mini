@@ -215,6 +215,9 @@ function baseCreateRenderer(options: RendererOptions): any {
     if (vnode === null) {
       // 如果vnode为空，我们执行卸载操作
       // TODO: 卸载
+      if (container._vnode) {
+        unmount(container._vnode)
+      }
     } else {
       // 如果不为空，我们就执行一个打补丁的操作（包括了挂载和更新）
       // 第一个参数是旧节点，如果没有的话就传null
