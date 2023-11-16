@@ -19,5 +19,14 @@ export const nodeOps = {
    */
   setElementText: (el: Element, text) => {
     el.textContent = text
+  },
+  /**
+   * 删除指定元素
+   */
+  remove: child => {
+    const parent = child.parentNode
+    if (parent) {
+      parent.removeChild(child)
+    }
   }
 }

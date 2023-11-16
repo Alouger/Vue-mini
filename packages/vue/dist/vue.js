@@ -650,6 +650,12 @@ var Vue = (function (exports) {
         // 将DOM的类型和子节点children的类型通过或运算合起来，这样就可以同时表示DOM类型和children的类型
         vnode.shapeFlag |= type;
     }
+    /**
+     * 根据 key || type 判断是否为相同类型节点
+     */
+    function isSameVNodeType(n1, n2) {
+        return n1.type === n2.type && n1.key === n2.key;
+    }
 
     function h(type, propsOrChildren, children) {
         // 获取参数的长度
@@ -706,6 +712,15 @@ var Vue = (function (exports) {
          */
         setElementText: function (el, text) {
             el.textContent = text;
+        },
+        /**
+         * 删除指定元素
+         */
+        remove: function (child) {
+            var parent = child.parentNode;
+            if (parent) {
+                parent.removeChild(child);
+            }
         }
     };
 
@@ -747,7 +762,7 @@ var Vue = (function (exports) {
         /**
         * 解构 options，获取所有的兼容性方法。一系列用于操作DOM的辅助函数，如insert、remove、patch等。这些函数负责实际的DOM操作，用于将虚拟DOM转换为实际的DOM，并进行插入、删除、更新等操作
         */
-        var hostInsert = options.insert, hostPatchProp = options.patchProp, hostCreateElement = options.createElement, hostSetElementText = options.setElementText;
+        var hostInsert = options.insert, hostPatchProp = options.patchProp, hostCreateElement = options.createElement, hostSetElementText = options.setElementText, hostRemove = options.remove;
         var processElement = function (oldVNode, newVNode, container, anchor) {
             // 根据旧节点是否存在来判断我们当前是要进行挂载操作还是更新操作
             if (oldVNode === null) {
@@ -858,6 +873,14 @@ var Vue = (function (exports) {
             if (oldVNode === newVNode) {
                 return;
             }
+            // debugger
+            /**
+             * 判断是否为相同类型节点
+             */
+            if (oldVNode && !isSameVNodeType(oldVNode, newVNode)) {
+                unmount(oldVNode);
+                oldVNode = null;
+            }
             var type = newVNode.type, shapeFlag = newVNode.shapeFlag;
             switch (type) {
                 case Text:
@@ -876,8 +899,12 @@ var Vue = (function (exports) {
                     }
             }
         };
+        var unmount = function (vnode) {
+            hostRemove(vnode.el);
+        };
         // 源码中这里是有第三个参数，也就是isSVG，但这里我们不考虑这种情况
         var render = function (vnode, container) {
+            // debugger
             if (vnode === null) ;
             else {
                 // 如果不为空，我们就执行一个打补丁的操作（包括了挂载和更新）

@@ -1,5 +1,5 @@
 import { ShapeFlags } from "packages/shared/src/shapeFlags"
-import { Fragment } from "./vnode"
+import { Fragment, isSameVNodeType } from "./vnode"
 import { EMPTY_OBJ } from "@vue/shared"
 
 export interface RendererOptions {
@@ -12,6 +12,10 @@ export interface RendererOptions {
   insert(el, parent: Element, anchor?): void
   // 创建Element
   createElement(type: string)
+  /**
+   * 卸载指定dom
+   */
+  remove(el): void
 }
 
 /**
@@ -35,7 +39,8 @@ function baseCreateRenderer(options: RendererOptions): any {
     insert: hostInsert,
     patchProp: hostPatchProp,
     createElement: hostCreateElement,
-    setElementText : hostSetElementText
+    setElementText : hostSetElementText,
+    remove: hostRemove
   } = options
   
   const processElement = (oldVNode, newVNode, container, anchor) => {
@@ -169,6 +174,14 @@ function baseCreateRenderer(options: RendererOptions): any {
     if (oldVNode === newVNode) {
       return
     }
+    // debugger
+    /**
+     * 判断是否为相同类型节点
+     */
+    if (oldVNode && !isSameVNodeType(oldVNode, newVNode)) {
+        unmount(oldVNode)
+        oldVNode = null
+    }
 
     const { type, shapeFlag } = newVNode
 
@@ -192,8 +205,13 @@ function baseCreateRenderer(options: RendererOptions): any {
     }
   }
 
+  const unmount = vnode => {
+    hostRemove(vnode.el!)
+  }
+
   // 源码中这里是有第三个参数，也就是isSVG，但这里我们不考虑这种情况
   const render = (vnode, container) => {
+    // debugger
     if (vnode === null) {
       // 如果vnode为空，我们执行卸载操作
       // TODO: 卸载
