@@ -15,7 +15,15 @@ export interface RendererOptions {
   /**
    * 卸载指定dom
    */
-  remove(el): void
+  remove(el): void,
+  /**
+   * 创建 Text 节点
+   */
+  createText(text: string),
+  /**
+   * 设置 text
+   */
+  setText(node, text)
 }
 
 /**
@@ -40,9 +48,30 @@ function baseCreateRenderer(options: RendererOptions): any {
     patchProp: hostPatchProp,
     createElement: hostCreateElement,
     setElementText : hostSetElementText,
-    remove: hostRemove
+    remove: hostRemove,
+    createText: hostCreateText,
+    setText: hostSetText
   } = options
-  
+  /**
+   * Text 的打补丁操作
+   */
+  const processText = (oldVNode, newVNode, container, anchor) => {
+    // 不存在旧的节点，则为 挂载 操作
+    if (oldVNode == null) {
+      // 生成节点
+      newVNode.el = hostCreateText(newVNode.children)
+      // 挂载
+      hostInsert(newVNode.el, container, anchor)
+    } else {
+      // 存在旧的节点，则为 更新 操作
+      // 更新, 感叹号的作用是断言oldVNode是必然存在的
+      const el = (newVNode.el = oldVNode.el!)
+      if (newVNode.children !== oldVNode.children) {
+        hostSetText(el, newVNode.children)
+      }
+    }
+  }
+
   const processElement = (oldVNode, newVNode, container, anchor) => {
     // 根据旧节点是否存在来判断我们当前是要进行挂载操作还是更新操作
     if (oldVNode === null) {
@@ -187,6 +216,7 @@ function baseCreateRenderer(options: RendererOptions): any {
 
     switch (type) {
       case Text:
+        processText(oldVNode, newVNode, container, anchor)
         break
       case Comment:
         break

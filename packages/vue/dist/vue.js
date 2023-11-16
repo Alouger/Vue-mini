@@ -721,6 +721,16 @@ var Vue = (function (exports) {
             if (parent) {
                 parent.removeChild(child);
             }
+        },
+        /**
+         * 创建 Text 节点
+         */
+        createText: function (text) { return doc.createTextNode(text); },
+        /**
+         * 设置 text
+         */
+        setText: function (node, text) {
+            node.nodeValue = text;
         }
     };
 
@@ -887,7 +897,27 @@ var Vue = (function (exports) {
         /**
         * 解构 options，获取所有的兼容性方法。一系列用于操作DOM的辅助函数，如insert、remove、patch等。这些函数负责实际的DOM操作，用于将虚拟DOM转换为实际的DOM，并进行插入、删除、更新等操作
         */
-        var hostInsert = options.insert, hostPatchProp = options.patchProp, hostCreateElement = options.createElement, hostSetElementText = options.setElementText, hostRemove = options.remove;
+        var hostInsert = options.insert, hostPatchProp = options.patchProp, hostCreateElement = options.createElement, hostSetElementText = options.setElementText, hostRemove = options.remove, hostCreateText = options.createText, hostSetText = options.setText;
+        /**
+         * Text 的打补丁操作
+         */
+        var processText = function (oldVNode, newVNode, container, anchor) {
+            // 不存在旧的节点，则为 挂载 操作
+            if (oldVNode == null) {
+                // 生成节点
+                newVNode.el = hostCreateText(newVNode.children);
+                // 挂载
+                hostInsert(newVNode.el, container, anchor);
+            }
+            else {
+                // 存在旧的节点，则为 更新 操作
+                // 更新, 感叹号的作用是断言oldVNode是必然存在的
+                var el = (newVNode.el = oldVNode.el);
+                if (newVNode.children !== oldVNode.children) {
+                    hostSetText(el, newVNode.children);
+                }
+            }
+        };
         var processElement = function (oldVNode, newVNode, container, anchor) {
             // 根据旧节点是否存在来判断我们当前是要进行挂载操作还是更新操作
             if (oldVNode === null) {
@@ -1009,6 +1039,7 @@ var Vue = (function (exports) {
             var type = newVNode.type, shapeFlag = newVNode.shapeFlag;
             switch (type) {
                 case Text:
+                    processText(oldVNode, newVNode, container, anchor);
                     break;
                 case Comment:
                     break;
