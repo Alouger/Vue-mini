@@ -3,6 +3,7 @@ import { patchClass } from "./modules/class";
 import { patchDOMProp } from "./modules/props";
 import { patchAttr } from "./modules/attr";
 import { patchStyle } from "./modules/style";
+import { patchEvent } from "./modules/event";
 
 export const patchProp = (el: Element, key, prevValue, nextValue) => {
   // 根据不同的prop做不同的处理
@@ -11,7 +12,7 @@ export const patchProp = (el: Element, key, prevValue, nextValue) => {
   } else if (key === 'style') {
     patchStyle(el, prevValue, nextValue)
   } else if (isOn(key)) { // 事件是以on开头的
-
+    patchEvent(el, key, prevValue, nextValue)
   } else if (shouldSetAsProp(el, key)) { // shouldSetAsProp 用来匹配DOM Properties
     // 通过 DOM Properties 指定
     patchDOMProp(el, key, nextValue)

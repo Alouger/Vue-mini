@@ -753,8 +753,13 @@ var Vue = (function (exports) {
         }
     }
 
+    /**
+     * 为 style 属性进行打补丁
+     */
     function patchStyle(el, prev, next) {
+        // 获取 style 对象
         var style = el.style;
+        // 判断新的样式是否为纯字符串
         var isCssString = isString(next);
         if (next && !isCssString) {
             // 新样式的挂载
@@ -772,8 +777,60 @@ var Vue = (function (exports) {
             }
         }
     }
+    /**
+     * 赋值样式
+     */
     function setStyle(style, name, val) {
         style[name] = val;
+    }
+
+    /**
+     * 为 event 事件进行打补丁
+     */
+    function patchEvent(el, rawName, prevValue, nextValue) {
+        // vei = vue event invokers
+        var invokers = el._vei || (el._vei = {});
+        // 检测是否有缓存行为
+        var existingInvoker = invokers[rawName];
+        // 如果有新值并且有缓存存在，说明要有更新行为。直接更新 invoker 的 value 即可
+        if (nextValue && existingInvoker) {
+            // 通过这种方式更替invoker.value()的回调函数内容，而不是调用 addEventListener 和 removeEventListener 解决了频繁的删除、新增事件时非常消耗性能的问题
+            existingInvoker.value = nextValue;
+        }
+        else {
+            // 转换成addEventListener和removeEventListener能接受的事件名
+            var name_1 = parseName(rawName);
+            // 判断此时是新增行为还是删除行为
+            if (nextValue) {
+                // 新增行为, nextValue一定是存在的
+                var invoker = (invokers[rawName] = createInvoker(nextValue));
+                el.addEventListener(name_1, invoker);
+            }
+            else if (existingInvoker) {
+                // 删除行为
+                el.removeEventListener(name_1, existingInvoker);
+                // 删除缓存
+                invokers[rawName] = undefined;
+            }
+        }
+    }
+    /**
+     * 直接返回剔除 on，其余转化为小写的事件名即可
+     */
+    function parseName(name) {
+        // 去掉开头的'on'两个字符，并且转为小写
+        return name.slice(2).toLowerCase();
+    }
+    /**
+     * 生成 invoker 函数
+     */
+    function createInvoker(initialValue) {
+        var invoker = function (e) {
+            invoker.value && invoker.value();
+        };
+        // value 为真实的事件行为
+        invoker.value = initialValue;
+        return invoker;
     }
 
     var patchProp = function (el, key, prevValue, nextValue) {
@@ -784,7 +841,9 @@ var Vue = (function (exports) {
         else if (key === 'style') {
             patchStyle(el, prevValue, nextValue);
         }
-        else if (isOn(key)) ;
+        else if (isOn(key)) { // 事件是以on开头的
+            patchEvent(el, key, prevValue, nextValue);
+        }
         else if (shouldSetAsProp(el, key)) { // shouldSetAsProp 用来匹配DOM Properties
             // 通过 DOM Properties 指定
             patchDOMProp(el, key, nextValue);
