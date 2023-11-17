@@ -151,6 +151,14 @@ function baseCreateRenderer(options: RendererOptions): any {
     const componentUpdateFn = () => {
       // 当前处于 mounted 之前，即执行 挂载 逻辑
       if (!instance.isMounted) {
+        // 获取 hook
+        const {bm, m} = instance
+
+        // beforeMount hook
+        if (bm) {
+          bm()
+        }
+
         // debugger
         // subTree得到的就是案例component中render函数返回的h('div', 'hello component')，一个VNode。debugger到这里显示的是：
         // subTree: 
@@ -163,6 +171,12 @@ function baseCreateRenderer(options: RendererOptions): any {
         const subTree = (instance.subTree = renderComponentRoot(instance))
         // 通过 patch 对 subTree，进行打补丁。即：渲染组件
         patch(null, subTree, container, anchor)
+
+        // mounted hook
+        if (m) {
+          m()
+        }
+
         /** 经过patch函数后subTree新增el，为：
          * subTree: 
              children: "hello component"
