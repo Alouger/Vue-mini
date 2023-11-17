@@ -889,13 +889,15 @@ var Vue = (function (exports) {
       * 解析 render 函数的返回值
       */
     function renderComponentRoot(instance) {
-        var vnode = instance.vnode, render = instance.render;
+        var vnode = instance.vnode, render = instance.render, data = instance.data;
         var result;
         try {
             // 解析到状态组件
             if (vnode.shapeFlag & 4 /* ShapeFlags.STATEFUL_COMPONENT */) {
                 // 获取到 result 返回值
-                result = normalizeVNode(render());
+                // call()改变this指向, render函数里的this就会指向data
+                // 如果 render 中使用了 this，则需要修改 this 指向
+                result = normalizeVNode(render.call(data));
             }
         }
         catch (error) {
@@ -955,6 +957,20 @@ var Vue = (function (exports) {
         // instance.type实际上就是component里面的render函数内容
         var Component = instance.type;
         instance.render = Component.render;
+        applyOptions(instance);
+    }
+    function applyOptions(instance) {
+        var dataOptions = instance.type.data;
+        // 存在 data 选项时
+        if (dataOptions) {
+            // 触发 dataOptions 函数，拿到 data 对象
+            var data = dataOptions();
+            // 如果拿到的 data 是一个对象
+            if (isObject(data)) {
+                // 则把 data 包装成 reactiv 的响应性数据，赋值给 instance
+                instance.data = reactive(data);
+            }
+        }
     }
 
     /**
