@@ -1,7 +1,10 @@
 import { ShapeFlags } from "packages/shared/src/shapeFlags"
 import { Fragment, isSameVNodeType, normalizeChildren } from "./vnode"
 import { EMPTY_OBJ, isString } from "@vue/shared"
-import { normalizeVNode } from "./componentRenderUtils"
+import { normalizeVNode, renderComponentRoot } from "./componentRenderUtils"
+import { createComponentInstance, setupComponent } from "./component"
+import { ReactiveEffect } from "packages/reactivity/src/effect"
+import { queuePreFlushCb } from "./scheduler"
 
 export interface RendererOptions {
   // patchProp是为指定的element的props打补丁
@@ -58,6 +61,17 @@ function baseCreateRenderer(options: RendererOptions): any {
     setText: hostSetText,
     createComment: hostCreateComment
   } = options
+
+  /**
+   * 组件的打补丁操作
+   */
+  const processComponet = (oldVNode, newVNode, container, anchor) => {
+    // debugger
+    if (oldVNode == null) {
+      // 挂载
+      mountComponent(newVNode, container, anchor)
+    }
+  }
 
   /**
    * Fragment 的打补丁操作
@@ -117,6 +131,61 @@ function baseCreateRenderer(options: RendererOptions): any {
       patchElement(oldVNode, newVNode)
     }
   }
+
+  const mountComponent = (initialVNode, container, anchor) => {
+    // 先生成组件的实例
+    initialVNode.component = createComponentInstance(initialVNode)
+    // 浅拷贝，绑定同一块内存空间
+    const instance = initialVNode.component
+
+    // 标准化组件实例数据
+    setupComponent(instance)
+    // 该函数负责真正渲染组件，设置组件渲染
+    setupRenderEffect(instance, initialVNode, container, anchor)
+  }
+  /**
+   * 设置组件渲染
+   */
+  const setupRenderEffect = (instance, initialVNode, container, anchor) => {
+    // 组件挂载和更新的方法
+    const componentUpdateFn = () => {
+      // 当前处于 mounted 之前，即执行 挂载 逻辑
+      if (!instance.isMounted) {
+        // debugger
+        // subTree得到的就是案例component中render函数返回的h('div', 'hello component')，一个VNode。debugger到这里显示的是：
+        // subTree: 
+        //   children: "hello component"
+        //   props: null
+        //   shapeFlag: 9
+        //   type: "div"
+        //   __v_isVNode: true
+        // 从 render 中获取需要渲染的内容
+        const subTree = (instance.subTree = renderComponentRoot(instance))
+        // 通过 patch 对 subTree，进行打补丁。即：渲染组件
+        patch(null, subTree, container, anchor)
+        /** 经过patch函数后subTree新增el，为：
+         * subTree: 
+             children: "hello component"
+             el: div
+             props: null
+             shapeFlag: 9
+             type: "div"
+             __v_isVNode: true
+         */
+        // 把组件根节点的 el，作为组件的 el
+        initialVNode.el = subTree.el
+      } else {
+
+      }
+    }
+    // 创建包含 scheduler 的 effect 实例
+    const effect = (instance.effect = new ReactiveEffect(componentUpdateFn, () => queuePreFlushCb(update)))
+    // 生成 update 函数
+    const update = (instance.update = () => effect.run())
+    // 触发 update 函数，本质上触发的是 componentUpdateFn
+    update()
+  }
+
   /**
    * element 的挂载操作
    */
@@ -283,7 +352,7 @@ function baseCreateRenderer(options: RendererOptions): any {
         if (shapeFlag & ShapeFlags.ELEMENT) {
           processElement(oldVNode, newVNode, container, anchor)
         } else if (shapeFlag & ShapeFlags.COMPONENT) {
-
+          processComponet(oldVNode, newVNode, container, anchor)
         }
     }
   }

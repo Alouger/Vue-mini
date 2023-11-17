@@ -1,4 +1,25 @@
+import { ShapeFlags } from "packages/shared/src/shapeFlags"
 import { createVNode } from "./vnode"
+
+/**
+  * 解析 render 函数的返回值
+  */
+export function renderComponentRoot(instance) {
+  const { vnode, render } = instance
+  let result
+
+  try {
+    // 解析到状态组件
+    if (vnode.shapeFlag & ShapeFlags.STATEFUL_COMPONENT) {
+      // 获取到 result 返回值
+      result = normalizeVNode(render!())
+    }
+  } catch (error) {
+    console.error(error)
+  }
+
+  return result
+}
 
 // 生成标准化的VNode
 export function normalizeVNode(child) {
