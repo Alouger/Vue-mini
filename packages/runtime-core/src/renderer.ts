@@ -188,8 +188,23 @@ function baseCreateRenderer(options: RendererOptions): any {
          */
         // 把组件根节点的 el，作为组件的 el
         initialVNode.el = subTree.el
-      } else {
 
+        // 在渲染完毕后，把标志位isMounted修改为true
+        instance.isMounted = true
+      } else {
+        let { next, vnode } = instance
+        if (!next) {
+          next = vnode
+        }
+        // 获取下一次的 subTree
+        const nextTree = renderComponentRoot(instance)
+        // 保存上一次的subTree，以便进行更新操作
+        const prevTree = instance.subTree
+        instance.subTree = nextTree
+        // 更新
+        patch(prevTree, nextTree, container, anchor)
+        // 更新 next
+        next.el = nextTree.el
       }
     }
     // 创建包含 scheduler 的 effect 实例

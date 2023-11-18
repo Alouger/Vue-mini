@@ -978,12 +978,34 @@ var Vue = (function (exports) {
         return setupResult;
     }
     function setupStatefulComponent(instance) {
+        var Component = instance.type;
+        var setup = Component.setup;
+        // 存在 setup ，则直接获取 setup 函数的返回值即可
+        if (setup) {
+            // setupResult在案例中就是setup函数return的匿名渲染函数() => h('div', obj.name)
+            var setupResult = setup();
+            handleSetupResult(instance, setupResult);
+        }
+        else {
+            // 如果不存在setup，说明是options API, 获取组件实例
+            finishComponentSetup(instance);
+        }
+    }
+    function handleSetupResult(instance, setupResult) {
+        // 存在 setupResult，并且它是一个函数，则 setupResult 就是需要渲染的 render
+        if (isFunction(setupResult)) {
+            instance.render = setupResult;
+        }
         finishComponentSetup(instance);
     }
     function finishComponentSetup(instance) {
         // instance.type实际上就是component里面的render函数内容
         var Component = instance.type;
-        instance.render = Component.render;
+        // 组件不存在 render 时，才需要重新赋值
+        if (!instance.render) {
+            instance.render = Component.render;
+        }
+        // 改变 options 中的 this 指向
         applyOptions(instance);
     }
     function applyOptions(instance) {
@@ -1004,7 +1026,7 @@ var Vue = (function (exports) {
         }
         // hooks
         if (created) {
-            debugger;
+            // debugger
             callHook(created, instance.data);
         }
         function registerLifecycleHook(register, hook) {
@@ -1015,7 +1037,8 @@ var Vue = (function (exports) {
         registerLifecycleHook(onMounted, mounted);
     }
     function callHook(hook, proxy) {
-        hook.bind(proxy);
+        // 注意这里bind后面还有一个括号
+        hook.bind(proxy)();
     }
 
     /**
@@ -1155,6 +1178,23 @@ var Vue = (function (exports) {
                      */
                     // 把组件根节点的 el，作为组件的 el
                     initialVNode.el = subTree.el;
+                    // 在渲染完毕后，把标志位isMounted修改为true
+                    instance.isMounted = true;
+                }
+                else {
+                    var next = instance.next, vnode = instance.vnode;
+                    if (!next) {
+                        next = vnode;
+                    }
+                    // 获取下一次的 subTree
+                    var nextTree = renderComponentRoot(instance);
+                    // 保存上一次的subTree，以便进行更新操作
+                    var prevTree = instance.subTree;
+                    instance.subTree = nextTree;
+                    // 更新
+                    patch(prevTree, nextTree, container, anchor);
+                    // 更新 next
+                    next.el = nextTree.el;
                 }
             };
             // 创建包含 scheduler 的 effect 实例

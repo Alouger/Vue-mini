@@ -1,5 +1,5 @@
 import { reactive } from "@vue/reactivity"
-import { isObject } from "@vue/shared"
+import { isFunction, isObject } from "@vue/shared"
 import { onBeforeMount, onMounted } from "./apiLifecycle"
 
 let uid = 0
@@ -49,14 +49,37 @@ export function setupComponent(instance) {
 }
 
 function setupStatefulComponent(instance) {
+  const Component = instance.type
+
+  const { setup } = Component
+  // 存在 setup ，则直接获取 setup 函数的返回值即可
+  if (setup) {
+    // setupResult在案例中就是setup函数return的匿名渲染函数() => h('div', obj.name)
+    const setupResult = setup()
+    handleSetupResult(instance, setupResult)
+  } else {
+    // 如果不存在setup，说明是options API, 获取组件实例
+    finishComponentSetup(instance)
+  }
+}
+
+export function handleSetupResult(instance, setupResult) {
+  // 存在 setupResult，并且它是一个函数，则 setupResult 就是需要渲染的 render
+  if (isFunction(setupResult)) {
+    instance.render = setupResult
+  }
   finishComponentSetup(instance)
 }
 
 export function finishComponentSetup(instance) { 
   // instance.type实际上就是component里面的render函数内容
   const Component = instance.type
-  instance.render = Component.render
+  // 组件不存在 render 时，才需要重新赋值
+  if (!instance.render) {
+    instance.render = Component.render
+  }
 
+  // 改变 options 中的 this 指向
   applyOptions(instance)
 }
 
@@ -87,7 +110,7 @@ function applyOptions(instance: any) {
 
   // hooks
   if (created) {
-    debugger
+    // debugger
     callHook(created, instance.data)
   }
 
@@ -100,5 +123,6 @@ function applyOptions(instance: any) {
 }
 
 function callHook(hook: Function, proxy) {
-  hook.bind(proxy)
+  // 注意这里bind后面还有一个括号
+  hook.bind(proxy)()
 }
