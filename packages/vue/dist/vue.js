@@ -1324,6 +1324,19 @@ var Vue = (function (exports) {
                 // 下标自增
                 i++;
             }
+            // 2. 自后向前diff对比
+            while (i <= oldChildrenEnd && i <= newChildrenEnd) {
+                var oldVNode = oldChildren[oldChildrenEnd];
+                var newVNode = newChildren[newChildrenEnd];
+                if (isSameVNodeType(oldVNode, newVNode)) {
+                    patch(oldVNode, newVNode, container, null);
+                }
+                else {
+                    break;
+                }
+                oldChildrenEnd--;
+                newChildrenEnd--;
+            }
         };
         /**
          * 为 props 打补丁
