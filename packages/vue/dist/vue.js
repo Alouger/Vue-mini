@@ -1337,7 +1337,7 @@ var Vue = (function (exports) {
                 oldChildrenEnd--;
                 newChildrenEnd--;
             }
-            // 3. 新节点多余旧节点
+            // 3. 新节点多于旧节点
             if (i > oldChildrenEnd) {
                 if (i <= newChildrenEnd) {
                     var nextPos = newChildrenEnd + 1;
@@ -1348,6 +1348,13 @@ var Vue = (function (exports) {
                         patch(null, normalizeVNode(newChildren[i]), container, anchor);
                         i++;
                     }
+                }
+            }
+            // 4. 旧节点多于新节点
+            else if (i > newChildrenEnd) {
+                while (i <= oldChildrenEnd) {
+                    unmount(oldChildren[i]);
+                    i++;
                 }
             }
         };
