@@ -362,6 +362,20 @@ function baseCreateRenderer(options: RendererOptions): any {
       oldChildrenEnd--
       newChildrenEnd--
     }
+
+    // 3. 新节点多余旧节点
+    if (i > oldChildrenEnd) {
+      if (i <= newChildrenEnd) {
+        const nextPos = newChildrenEnd + 1
+        // 锚点anchor决定了我们新节点渲染的位置，表示我们新增的这个节点要被插入到锚点之前上去
+        const anchor = nextPos < newChildrenLength ? newChildren[nextPos].el : parentAnchor
+        while(i <= newChildrenEnd) {
+          // 因为我们是新增节点，所有patch函数在形参列表第一个参数（代表旧节点）可以是null
+          patch(null, normalizeVNode(newChildren[i]), container, anchor)
+          i++
+        }
+      }
+    }
   }
 
   /**

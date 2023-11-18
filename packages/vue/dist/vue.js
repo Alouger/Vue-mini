@@ -1077,7 +1077,7 @@ var Vue = (function (exports) {
                 mountChildren(newVNode.children, container, anchor);
             }
             else {
-                patchChildren(oldVNode, newVNode, container);
+                patchChildren(oldVNode, newVNode, container, anchor);
             }
         };
         /**
@@ -1242,7 +1242,7 @@ var Vue = (function (exports) {
             var oldProps = oldVNode.props || EMPTY_OBJ;
             var newProps = newVNode.props || EMPTY_OBJ;
             // 更新子节点
-            patchChildren(oldVNode, newVNode, el);
+            patchChildren(oldVNode, newVNode, el, null);
             patchProps(el, newVNode, oldProps, newProps);
         };
         /**
@@ -1285,7 +1285,7 @@ var Vue = (function (exports) {
                     // 新子节点也为 ARRAY_CHILDREN，旧子节点为 ARRAY_CHILDREN
                     if (shapeFlag & 16 /* ShapeFlags.ARRAY_CHILDREN */) {
                         // TODO: 这里要进行 diff 运算
-                        patchKeyedChildren(c1, c2, container);
+                        patchKeyedChildren(c1, c2, container, anchor);
                     }
                 }
                 else {
@@ -1324,7 +1324,7 @@ var Vue = (function (exports) {
                 // 下标自增
                 i++;
             }
-            // 2. 自后向前diff对比
+            // 2. 自后向前diff对比。经过该循环之后，从后开始的相同 vnode 将被处理
             while (i <= oldChildrenEnd && i <= newChildrenEnd) {
                 var oldVNode = oldChildren[oldChildrenEnd];
                 var newVNode = newChildren[newChildrenEnd];
@@ -1336,6 +1336,19 @@ var Vue = (function (exports) {
                 }
                 oldChildrenEnd--;
                 newChildrenEnd--;
+            }
+            // 3. 新节点多余旧节点
+            if (i > oldChildrenEnd) {
+                if (i <= newChildrenEnd) {
+                    var nextPos = newChildrenEnd + 1;
+                    // 锚点anchor决定了我们新节点渲染的位置，表示我们新增的这个节点要被插入到锚点之前上去
+                    var anchor = nextPos < newChildrenLength ? newChildren[nextPos].el : parentAnchor;
+                    while (i <= newChildrenEnd) {
+                        // 因为我们是新增节点，所有patch函数在形参列表第一个参数（代表旧节点）可以是null
+                        patch(null, normalizeVNode(newChildren[i]), container, anchor);
+                        i++;
+                    }
+                }
             }
         };
         /**
