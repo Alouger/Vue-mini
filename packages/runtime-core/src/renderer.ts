@@ -233,7 +233,7 @@ function baseCreateRenderer(options: RendererOptions): any {
       // host开头的本质上都是我们传递过来的这个nodeOps里面这个浏览器相关的函数
       hostSetElementText(el, vnode.children as string)
     } else if (shapeFlag & ShapeFlags.ARRAY_CHILDREN) {
-
+      mountChildren(vnode.children, el, anchor)
     }
 
     // 3. 设置props
@@ -303,6 +303,7 @@ function baseCreateRenderer(options: RendererOptions): any {
         // 新子节点也为 ARRAY_CHILDREN，旧子节点为 ARRAY_CHILDREN
         if (shapeFlag & ShapeFlags.ARRAY_CHILDREN) {
           // TODO: 这里要进行 diff 运算
+          patchKeyedChildren(c1, c2, container, anchor)
         }
         // 新子节点不为 ARRAY_CHILDREN，旧子节点为 ARRAY_CHILDREN，则直接卸载旧子节点
         else {
@@ -321,6 +322,35 @@ function baseCreateRenderer(options: RendererOptions): any {
       }
     }
   }
+  /**
+   * diff
+   */
+  const patchKeyedChildren = (oldChildren, newChildren, container, parentAnchor) => {
+    // 索引
+    let i = 0
+    // 新的子节点数组的长度
+    const newChildrenLength = newChildren.length
+    // 旧的子节点最大（最后一个）下标
+    let oldChildrenEnd = oldChildren.length - 1
+    // 新的子节点最大（最后一个）下标
+    let newChildrenEnd = newChildrenLength - 1
+
+    // 1. 自前向后diff 对比。经过该循环之后，从前开始的相同 vnode 将被处理
+    while (i <= oldChildrenEnd && i <= newChildrenEnd) {
+      const oldVNode = oldChildren[i]
+      const newVNode = normalizeVNode(newChildren[i])
+      // 如果 oldVNode 和 newVNode 被认为是同一个 vnode，则直接 patch 即可
+      if (isSameVNodeType(oldVNode, newVNode)) {
+        patch(oldVNode, newVNode,container, null)
+      } else {
+        // 如果不被认为是同一个 vnode，则直接跳出循环
+        break
+      }
+       // 下标自增
+      i++
+    }
+  }
+
   /**
    * 为 props 打补丁
    */
@@ -396,6 +426,7 @@ function baseCreateRenderer(options: RendererOptions): any {
     if (vnode === null) {
       // 如果vnode为空，我们执行卸载操作
       // TODO: 卸载
+      // 新的 vnode 不存在，旧的 vnode 存在，说明当前属于 unmount 操作
       if (container._vnode) {
         unmount(container._vnode)
       }
@@ -406,7 +437,7 @@ function baseCreateRenderer(options: RendererOptions): any {
       
       patch(container._vnode || null, vnode, container)
     }
-
+    // 将新的 vnode 存储到 container._vnode 中，即后续渲染中旧的 vnode
     container._vnode = vnode
   }
 
