@@ -383,7 +383,195 @@ function baseCreateRenderer(options: RendererOptions): any {
         i++
       }
     }
+    // 5. 乱序的 diff 比对
+    else {
+    // 旧子节点的开始索引
+    const oldStartIndex = i
+    // 新子节点的开始索引
+    const newStartIndex = i
+    
+    // 5.1 build key: index map for newChildren
+    // 遍历新节点，生成keyToNewIndexMap
+    // 键值为新节点的key值，值为新节点的索引, 伪代码：keyToNewIndexMap<key, index> 
+    const keyToNewIndexMap = new Map()
+    for (i = newStartIndex; i <= newChildrenEnd; i++) {
+      // 从 newChildren 中根据开始索引获取每一个 child
+      const nextChild = normalizeVNode(newChildren[i])
+      // child 必须存在 key（这也是为什么 v-for 必须要有 key 的原因）
+      if (nextChild.key != null) {
+        // 把 key 和 对应的索引，放到 keyToNewIndexMap 对象中
+        keyToNewIndexMap.set(nextChild.key, i)
+      }
+    }
+  
+    // 5.2 创建将要patch的节点数组newIndexToOldIndexMap, 并尝试进行 patch（打补丁）或 unmount（删除）旧节点
+    // 下标为新节点的索引，值为旧节点的索引+1
+    let j
+    // 记录已经 patch 的节点数
+    let patched = 0
+    // 计算新节点中还有多少节点需要被 patch
+    const toBePatched = newChildrenEnd - newStartIndex + 1
+    // 标记是否需要移动
+    let moved = false
+    // 记录这次对比的旧节点到新节点最长可复用的索引, 配合 moved 进行使用，它始终保存当前最大的 index 值
+    let maxNewIndexSoFar = 0
+    /**
+     * 创建将要patch的节点数组
+     * 新节点对应旧节点的数组
+     * 数组下标为新节点的索引(即 当前newChildrenIndex - newStartIndex)，值为旧节点的索引+1
+     */
+    const newIndexToOldIndexMap = new Array(toBePatched)
+    /**
+     * 默认置为 0
+     * 表示新增节点
+     * 这也是为什么值是 旧节点索引+1 而不直接存索引的原因了
+     * 后续判断是否存在可复用的旧节点再重新赋值
+     */
+    for (i = 0; i < toBePatched; i++) newIndexToOldIndexMap[i] = 0
+    // 遍历 oldChildren（s1 = oldChildrenStart; e1 = oldChildrenEnd），
+    // 获取旧节点（oldChildren），如果当前 已经处理的节点数量 > 待处理的节点数量，
+    // 那么就证明：《所有的节点都已经更新完成，剩余的旧节点全部删除即可》
+    for (i = oldStartIndex; i <= oldChildrenEnd; i++) {
+      // 获取一下旧虚拟节点
+      const prevChild = oldChildren[i]
+      if (patched >= toBePatched) {
+        // 已经patch的节点数量大于或等于需要被patch的节点数
+        // 说明当前节点是需要被删除的
+        // patched >= toBePatched代表新vnode已经循环完成，不需要再找复用的旧vnode
+        // 说明剩下还没复用的旧vnode都已经废弃，直接unmount()移除，一般发生在旧vnode末尾存在废弃节点
+        unmount(prevChild)
+        continue
+      }
+      // 遍历 oldChildren（s1 = oldChildrenStart; e1 = oldChildrenEnd），获取旧节点（c1 = oldChildren），如果当前 已经处理的节点数量 > 待处理的节点数量，那么就证明：《所有的节点都已经更新完成，剩余的旧节点全部删除即可》
+      // 获取当前旧节点对应的新节点索引
+      let newIndex
+      // -------- 寻找能够复用的vnode的newIndex --------------
+      // 旧节点的 key 存在时
+      if (prevChild.key != null) {
+        /**
+         * 旧节点存在key值
+         * 直接在 keyToNewIndexMap 查找
+         * 获取新节点的索引（newIndex）
+         */
+        newIndex = keyToNewIndexMap.get(prevChild.key)
+      }
+      // 最终没有找到新节点的索引，则证明：当前旧节点没有对应的新节点
+      if (newIndex === undefined) {
+        /**
+         * newIndex 为 undefined
+         * 说明当前旧节点在新的虚拟 DOM 树中被删了
+         * 直接卸载
+         */
+        unmount(prevChild)
+      }
+      else {
+        // -------- 寻找能够复用的vnode的newIndex --------------
+        /**
+         * newIndex有值
+         * 说明当前旧节点在新节点数组中还存在，可能只是挪了位置
+         * 那么接下来就是要判断对于该新节点而言，是要 patch（打补丁）还是 move（移动）
+         */
+        /**
+         * 记录一下 newIndexToOldIndexMap
+         * 表明当前新旧节点需要 patch
+         */
+        // ========逻辑3：newIndexToOldIndexMap和move的构建为下一步骤做准备========
+        // 因为 newIndex 包含已处理的节点，所以需要减去newChildrenStart, 表示：不计算已处理的节点
+        newIndexToOldIndexMap[newIndex - newStartIndex] = i + 1
+        if (newIndex >= maxNewIndexSoFar) {
+          // 持续递增, 新节点索引大于或等于最长可复用索引，重新赋值
+          maxNewIndexSoFar = newIndex
+        } else {
+          /**
+           * 反之
+           * 说明新节点在最长可复用节点的左侧
+           * 需要移动（左移）
+           * newIndex < maxNewIndexSoFar说明目前的旧vnode的位置应该移动到它前面旧vnode的前面去，即目前的旧vnode是需要移动的
+           */
+          moved = true
+        }
+        // ========逻辑3：newIndexToOldIndexMap和move的构建为下一步骤做准备========
+        // -------- 寻找了能够复用的vnode的newIndex，更新能复用的旧vnode --------------
+        // 直接复用，patch（处理可能存在的孙子节点、更新一下属性等）
+        patch(prevChild, newChildren[newIndex], container, null)
+        patched++
+      }
+    }
+
+    // 5.3：移动/新增处理
+    // 由步骤5.2可以知道，该步骤会移除所有废弃的旧vnode，
+    // 因此剩余的逻辑只有 移动可复用的vnode到正确的位置 + 插入之前没有过的新vnode
+    /**
+     * 仅当节点需要移动的时候，我们才需要生成最长递增子序列，否则只需要有一个空数组即可
+     * 根据 newIndexToOldIndexMap 数组
+     * 生成最长稳定序列
+     * 最长稳定序列在这里存的就是不需要移动的节点索引
+     */
+    const increasingNewIndexSequence = moved
+      ? getSequence(newIndexToOldIndexMap)
+      : []
+    
+    // 最长稳定序列末尾节点索引
+    // j >= 0 表示：初始值为 最长递增子序列的最后下标
+    // j < 0 表示：《不存在》最长递增子序列。
+    j = increasingNewIndexSequence.length - 1
+    // 从后往前遍历需要 patch 的节点数
+    // 从尾->头进行新vnode的遍历
+    // 使用倒序遍历新的children数组是因为以便我们可以使用最后修补的节点作为锚点, 如果没有相同的后置元素，则添加到container子元素的末尾，如果有相同的后置元素，则以最前面一个后置元素作为anchor
+    for (i = toBePatched - 1; i >= 0; i--) {
+      // 新虚拟节点索引
+      // 在步骤5.2的计算是const toBePatched = newChildrenEnd - newStartIndex + 1
+      // 所以newChildrenEnd = newStartIndex + toBePatched - 1
+      //                    = newStartIndex + i
+      // nextIndex（需要更新的新节点下标） = newChildrenStart + i
+      const nextIndex = newStartIndex + i
+      // 新虚拟节点
+      const nextChild = newChildren[nextIndex]
+      // 将新节点的真实 DOM 作为后续插入的锚点（是否超过了最长长度）
+      const anchor =
+        nextIndex + 1 < newChildrenLength
+          ? newChildren[nextIndex + 1].el
+          : parentAnchor
+      if (newIndexToOldIndexMap[i] === 0) {
+        /**
+         * newIndexToOldIndexMap是以newChildrenArray建立的初始化都为0的数组，
+         * 然后在步骤5.2 逻辑3进行oldChildrenArray的遍历，找到可以复用的新vnode，
+         * 进行newIndexToOldIndexMap[xxx]=旧vnode的index+1的赋值，
+         * 因此newIndexToOldIndexMap[xxx]=0就代表这个新vnode是之前没有过的，
+         * 直接进行patch(null, nextChild)，即mount()插入新的元素
+         * 为 0 的话就是新增的节点
+         * 直接挂载新节点
+         */
+        patch(null, nextChild, container, anchor)
+      } else if (moved) {
+        // j < 0 表示：不存在 最长递增子序列
+        // i !== increasingNewIndexSequence[j] 表示：当前节点不在最后位置
+        // 那么此时就需要 move （移动）
+        if (j < 0 || i !== increasingNewIndexSequence[j]) {
+          /**
+           * 当前索引不在最长递增序列中
+           * 移动当前索引对应的新节点
+           * 移动到锚点节点之前
+           */
+          move(nextChild, container, anchor)
+        } else {
+          j--
+        }
+      }
+    }
   }
+  
+    
+  }
+ 
+  /**
+   * 移动节点到指定位置
+   */
+  const move = (vnode, container, anchor) => {
+    const { el } = vnode
+    hostInsert(el!, container, anchor)
+  }
+
 
   /**
    * 为 props 打补丁
@@ -478,4 +666,86 @@ function baseCreateRenderer(options: RendererOptions): any {
   return {
     render
   }
+}
+
+/**
+ * 获取最长递增子序列下标
+ * 维基百科：https://en.wikipedia.org/wiki/Longest_increasing_subsequence
+ * 百度百科：https://baike.baidu.com/item/%E6%9C%80%E9%95%BF%E9%80%92%E5%A2%9E%E5%AD%90%E5%BA%8F%E5%88%97/22828111
+ */
+function getSequence(arr) {
+  // 获取一个数组浅拷贝。注意 p 的元素改变并不会影响 arr
+  // p 是一个最终的回溯数组，它会在最终的 result 回溯中被使用
+  // 它会在每次 result 发生变化时，记录 result 更新前最后一个索引的值
+  const p = arr.slice()
+  // 定义返回值（最长递增子序列下标），因为下标从 0 开始，所以它的初始值为 0
+  const result = [0]
+  let i, j, u, v, c
+  // 当前数组的长度
+  const len = arr.length
+  // 对数组中所有的元素进行 for 循环处理，i = 下标
+  for (i = 0; i < len; i++) {
+    // 根据下标获取当前对应元素
+    const arrI = arr[i]
+    //
+    if (arrI !== 0) {
+      // 获取 result 中的最后一个元素，即：当前 result 中保存的最大值的下标
+      j = result[result.length - 1]
+      // arr[j] = 当前 result 中所保存的最大值
+      // arrI = 当前值
+      // 如果 arr[j] < arrI 。那么就证明，当前存在更大的序列，那么该下标就需要被放入到 result 的最后位置
+      if (arr[j] < arrI) {
+        p[i] = j
+        // 把当前的下标 i 放入到 result 的最后位置
+        result.push(i)
+        continue
+      }
+      // 不满足 arr[j] < arrI 的条件，就证明目前 result 中的最后位置保存着更大的数值的下标。
+      // 但是这个下标并不一定是一个递增的序列，比如： [1, 3] 和 [1, 2]
+      // 所以我们还需要确定当前的序列是递增的。
+      // 计算方式就是通过：二分查找来进行的
+
+      // 初始下标
+      u = 0
+      // 最终下标
+      v = result.length - 1
+      // 只有初始下标 < 最终下标时才需要计算
+      while (u < v) {
+        // (u + v) 转化为 32 位 2 进制，右移 1 位 === 取中间位置（向下取整）例如：8 >> 1 = 4;  9 >> 1 = 4; 5 >> 1 = 2
+        // https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Operators/Right_shift
+        // c 表示中间位。即：初始下标 + 最终下标 / 2 （向下取整）
+        c = (u + v) >> 1
+        // 从 result 中根据 c（中间位），取出中间位的下标。
+        // 然后利用中间位的下标，从 arr 中取出对应的值。
+        // 即：arr[result[c]] = result 中间位的值
+        // 如果：result 中间位的值 < arrI，则 u（初始下标）= 中间位 + 1。即：从中间向右移动一位，作为初始下标。 （下次直接从中间开始，往后计算即可）
+        if (arr[result[c]] < arrI) {
+          u = c + 1
+        } else {
+          // 否则，则 v（最终下标） = 中间位。即：下次直接从 0 开始，计算到中间位置 即可。
+          v = c
+        }
+      }
+      // 最终，经过 while 的二分运算可以计算出：目标下标位 u
+      // 利用 u 从 result 中获取下标，然后拿到 arr 中对应的值：arr[result[u]]
+      // 如果：arr[result[u]] > arrI 的，则证明当前  result 中存在的下标 《不是》 递增序列，则需要进行替换
+      if (arrI < arr[result[u]]) {
+        if (u > 0) {
+          p[i] = result[u - 1]
+        }
+        // 进行替换，替换为递增序列
+        result[u] = i
+      }
+    }
+  }
+  // 重新定义 u。此时：u = result 的长度
+  u = result.length
+  // 重新定义 v。此时 v = result 的最后一个元素
+  v = result[u - 1]
+  // 自后向前处理 result，利用 p 中所保存的索引值，进行最后的一次回溯
+  while (u-- > 0) {
+    result[u] = v
+    v = p[v]
+  }
+  return result
 }
