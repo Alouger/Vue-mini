@@ -1984,14 +1984,253 @@ var Vue = (function (exports) {
         context.source = source.slice(numberOfCharacters);
     }
 
+    /**
+     * 单个元素的根节点
+     */
+    function isSingleElementRoot(root, child) {
+        var children = root.children;
+        return children.length === 1 && child.type === 1 /* NodeTypes.ELEMENT */;
+    }
+
+    /**
+     * 创建 transform 上下文
+     */
+    // 第二个参数我们只需要nodeTransforms，这里应该用了解构
+    function createTransformContext(root, _a) {
+        var _b = _a.nodeTransforms, nodeTransforms = _b === void 0 ? [] : _b;
+        var context = {
+            nodeTransforms: nodeTransforms,
+            root: root,
+            helpers: new Map(),
+            currentNode: root,
+            parent: null,
+            childIndex: 0,
+            helper: function (name) {
+                var count = context.helpers.get(name) || 0;
+                context.helpers.set(name, count + 1);
+                return name;
+            }
+        };
+        return context;
+    }
+    /**
+     * 根据 AST 生成 JavaScript AST
+     * @param root AST
+     * @param options 配置对象
+     */
+    function transform(root, options) {
+        // 创建 transform 上下
+        var context = createTransformContext(root, options);
+        traverseNode(root, context);
+        createRootCodegen(root);
+        root.helpers = __spreadArray([], __read(context.helpers.keys()), false);
+        // 下面这些空数组源码里是有处理的，我们在此项目中不做处理了，如果申明这些数组的话可能会报错
+        root.components = [];
+        root.directives = [];
+        root.imports = [];
+        root.hoists = [];
+        root.temps = [];
+        root.cached = [];
+    }
+    /**
+     * 遍历转化节点，转化的过程一定要是深度优先的（即：孙 -> 子 -> 父），因为当前节点的状态往往需要根据子节点的情况来确定。
+     * 转化的过程分为两个阶段：
+     * 1. 进入阶段：存储所有节点的转化函数到 exitFns 中
+     * 2. 退出阶段：执行 exitFns 中缓存的转化函数，且一定是倒叙的。因为只有这样才能保证整个处理过程是深度优先的
+     */
+    function traverseNode(node, context) {
+        // 通过上下文记录当前正在处理的 node 节点
+        context.currentNode = node;
+        // 获取当前所有 node 节点的 transform 方法
+        var nodeTransforms = context.nodeTransforms;
+        // 存储转化函数的数组
+        var exitFns = [];
+        // 循环获取节点的 transform 方法，缓存到 exitFns 中
+        for (var i_1 = 0; i_1 < nodeTransforms.length; i_1++) {
+            // nodeTransforms[i](node, context)执行好后返回里面的闭包函数
+            var onExit = nodeTransforms[i_1](node, context);
+            if (onExit) {
+                exitFns.push(onExit);
+            }
+        }
+        // 我们所有的节点都有对应的子节点，我们不可能只处理父节点，不去处理子节点
+        // 继续转化子节点
+        switch (node.type) {
+            case 1 /* NodeTypes.ELEMENT */:
+            case 0 /* NodeTypes.ROOT */:
+                traverseChildren(node, context);
+                break;
+        }
+        // ---------------- 进入阶段完成 ----------------
+        // ---------------- 退出阶段开始 ----------------
+        // 在退出时执行 transform
+        context.currentNode = node;
+        var i = exitFns.length;
+        while (i--) {
+            // 依次执行我们存储的转化函数(倒序，因为只有这样才能保证整个处理过程是深度优先的)
+            exitFns[i]();
+        }
+    }
+    /**
+     * 循环处理子节点
+     */
+    function traverseChildren(parent, context) {
+        // 循环依次处理子节点
+        parent.children.forEach(function (node, index) {
+            context.parent = parent;
+            context.childIndex = index;
+            traverseNode(node, context);
+        });
+    }
+    /**
+     * 生成 root 节点下的 codegen
+     */
+    function createRootCodegen(root) {
+        var children = root.children;
+        // Vue2仅支持单个根节点，Vue3支持多个根节点
+        // 仅支持一个根节点的处理
+        if (children.length === 1) {
+            // 获取单个根节点
+            var child = children[0];
+            if (isSingleElementRoot(root, child) && child.codegenNode) {
+                var codegenNode = child.codegenNode;
+                root.codegenNode = codegenNode;
+            }
+        }
+    }
+
+    var _a;
+    var CREATE_ELEMENT_VNODE = Symbol('createElementVNode');
+    // createVNode在vnode.ts中，用于生成一个 VNode 对象，并返回
+    var CREATE_VNODE = Symbol('createVNode');
+    /**
+     * const {xxx} = Vue
+     * 即：从 Vue 中可以被导出的方法，我们这里统一使用  createVNode
+     */
+    (_a = {},
+        // 让每一个Symbol对应一个函数
+        _a[CREATE_ELEMENT_VNODE] = 'createElementVNode',
+        _a[CREATE_VNODE] = 'createVNode',
+        _a);
+
+    function createVNodeCall(context, tag, props, children) {
+        if (context) {
+            // helper在transform.ts中的createTransformContext函数里往helpers里放置对应的Symbol
+            // helpers的key是我们最终生成render的一个执行函数，所以我们这里helper传入的参数就是生成render函数的执行函数
+            // 源码里这些执行函数特别多，我们这里只考虑CREATE_ELEMENT_VNODE，CREATE_VNODE
+            context.helper(CREATE_ELEMENT_VNODE);
+        }
+        // return出codegenNode的属性
+        return {
+            type: 13 /* NodeTypes.VNODE_CALL */,
+            tag: tag,
+            props: props,
+            children: children
+        };
+    }
+
+    /**
+     * 对 element 节点的转化方法
+     */
+    var transformElement = function (node, context) {
+        // 闭包函数
+        return function postTransformElement() {
+            node = context.currentNode;
+            // 仅处理 ELEMENT 类型
+            if (node.type !== 1 /* NodeTypes.ELEMENT */) {
+                return;
+            }
+            var tag = node.tag;
+            var vnodeTag = "\"".concat(tag, "\"");
+            var vnodeProps = [];
+            var vnodeChildren = node.children;
+            // transform里面的核心就是给node节点增加了codegenNode属性
+            node.codegenNode = createVNodeCall(context, vnodeTag, vnodeProps, vnodeChildren);
+        };
+    };
+
+    function isText(node) {
+        return node.type === 5 /* NodeTypes.INTERPOLATION */ || node.type === 2 /* NodeTypes.TEXT */;
+    }
+
+    /**
+     * 将相邻的文本节点和表达式合并为一个表达式。
+     *
+     * 例如:
+     * <div>hello {{ msg }}</div>
+     * 上述模板包含两个节点：
+     * 1. hello：TEXT 文本节点
+     * 2. {{ msg }}：INTERPOLATION 表达式节点
+     * 这两个节点在生成 render 函数时，需要被合并： 'hello' + _toDisplayString(_ctx.msg)
+     * 那么在合并时就要多出来这个 + 加号。
+     * 例如：
+     * children:[
+     * 	{ TEXT 文本节点 },
+     *  " + ",
+     *  { INTERPOLATION 表达式节点 }
+     * ]
+     */
+    var transformText = function (node, context) {
+        if (node.type === 0 /* NodeTypes.ROOT */ ||
+            node.type === 1 /* NodeTypes.ELEMENT */ ||
+            node.type === 11 /* NodeTypes.FOR */ ||
+            node.type === 10 /* NodeTypes.IF_BRANCH */) {
+            return function () {
+                // 先拿到所有的children
+                var children = node.children;
+                // 当前容器
+                var currentContainer;
+                // 循环处理所有的子节点
+                for (var i = 0; i < children.length; i++) {
+                    var child = children[i];
+                    if (isText(child)) {
+                        // j = i + 1 表示下一个节点，j是i后面的第一个节点，也就是说j是i的下一个节点
+                        for (var j = i + 1; j < children.length; j++) {
+                            var next = children[j];
+                            // 当前节点 child 和 下一个节点 next 都是 Text 节点
+                            if (isText(next)) {
+                                if (!currentContainer) {
+                                    // 生成一个复合表达式节点, createCompoundExpression第一个参数[child]就是children
+                                    currentContainer = children[i] = createCompoundExpression([child], child.loc);
+                                }
+                                //合并, 在 当前节点 child 和 下一个节点 next 中间，插入 "+" 号，child是一个数组，也就是说children这个属性是一个数组
+                                currentContainer.children.push(' + ', next);
+                                // 删掉下一个子节点，因为已经处理好了
+                                children.splice(j, 1);
+                                j--;
+                            }
+                            else {
+                                // 如果当前节点是text，下一个节点不是text，就不需要合并，把 currentContainer 置空即可
+                                currentContainer = undefined;
+                                break;
+                            }
+                        }
+                    }
+                }
+            };
+        }
+    };
+    function createCompoundExpression(children, loc) {
+        return {
+            type: 8 /* NodeTypes.COMPOUND_EXPRESSION */,
+            loc: loc,
+            children: children
+        };
+    }
+
     function baseCompile(template, options) {
+        if (options === void 0) { options = {}; }
         var ast = baseParse(template);
+        transform(ast, extend(options, {
+            nodeTransforms: [transformElement, transformText]
+        }));
+        console.log(ast);
         console.log(JSON.stringify(ast));
         return {};
     }
 
     function compile(template, options) {
-        return baseCompile(template);
+        return baseCompile(template, options);
     }
 
     exports.Comment = Comment$1;
