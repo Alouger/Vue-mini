@@ -76,6 +76,7 @@ function parseChildren(context: ParserContext, ancestors) {
     let node
     // 如果开头是模板插值语法
     if (startsWith(s, '{{')) {
+      node = parseInterpolation(context)
     }
     // < 意味着一个标签的开始
     else if (s[0] === '<') {
@@ -96,6 +97,29 @@ function parseChildren(context: ParserContext, ancestors) {
   }
 
   return nodes
+}
+
+function parseInterpolation(context: ParserContext) {
+  const [open, close] = ['{{', '}}']
+  advanceBy(context, open.length)
+
+
+  const closeIndex = context.source.indexOf(close, open.length)
+  // parseTextData从由第二个参数指定的位置（length）获取给定长度的文本数据。
+  const preTrimContent = parseTextData(context, closeIndex)
+  // 获取插值表达式中间的值
+  const content = preTrimContent.trim()
+
+  advanceBy(context, close.length)
+
+  return {
+    type: NodeTypes.INTERPOLATION,
+    content: {
+      type: NodeTypes.SIMPLE_EXPRESSION,
+      isStatic: false,
+      content
+    }
+  }
 }
 
 /**

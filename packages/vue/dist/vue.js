@@ -1,6 +1,10 @@
 var Vue = (function (exports) {
     'use strict';
 
+    var toDisplayString = function (val) {
+        return String(val);
+    };
+
     var isArray = Array.isArray;
     var isObject = function (val) {
         return val !== null && typeof val === 'object';
@@ -890,7 +894,7 @@ var Vue = (function (exports) {
       * 解析 render 函数的返回值
       */
     function renderComponentRoot(instance) {
-        var vnode = instance.vnode, render = instance.render, data = instance.data;
+        var vnode = instance.vnode, render = instance.render, _a = instance.data, data = _a === void 0 ? {} : _a;
         var result;
         try {
             // 解析到状态组件
@@ -898,7 +902,7 @@ var Vue = (function (exports) {
                 // 获取到 result 返回值
                 // call()改变this指向, render函数里的this就会指向data
                 // 如果 render 中使用了 this，则需要修改 this 指向
-                result = normalizeVNode(render.call(data));
+                result = normalizeVNode(render.call(data, data));
             }
         }
         catch (error) {
@@ -1792,7 +1796,9 @@ var Vue = (function (exports) {
             // 如果开头是模板插值语法
             = void 0;
             // 如果开头是模板插值语法
-            if (startsWith(s, '{{')) ;
+            if (startsWith(s, '{{')) {
+                node = parseInterpolation(context);
+            }
             // < 意味着一个标签的开始
             else if (s[0] === '<') {
                 // 如果第一个字符是 "<"，并且第二个字符是 小写英文字符，则认为这是一个标签节点(<x)，于是调用 parseElement 完成标签的解
@@ -1809,6 +1815,24 @@ var Vue = (function (exports) {
             pushNode(nodes, node);
         }
         return nodes;
+    }
+    function parseInterpolation(context) {
+        var _a = __read(['{{', '}}'], 2), open = _a[0], close = _a[1];
+        advanceBy(context, open.length);
+        var closeIndex = context.source.indexOf(close, open.length);
+        // parseTextData从由第二个参数指定的位置（length）获取给定长度的文本数据。
+        var preTrimContent = parseTextData(context, closeIndex);
+        // 获取插值表达式中间的值
+        var content = preTrimContent.trim();
+        advanceBy(context, close.length);
+        return {
+            type: 5 /* NodeTypes.INTERPOLATION */,
+            content: {
+                type: 4 /* NodeTypes.SIMPLE_EXPRESSION */,
+                isStatic: false,
+                content: content
+            }
+        };
     }
     /**
      * 解析 Element 元素。例如：<div>
@@ -1992,6 +2016,22 @@ var Vue = (function (exports) {
         return children.length === 1 && child.type === 1 /* NodeTypes.ELEMENT */;
     }
 
+    var _a;
+    var CREATE_ELEMENT_VNODE = Symbol('createElementVNode');
+    // createVNode在vnode.ts中，用于生成一个 VNode 对象，并返回
+    var CREATE_VNODE = Symbol('createVNode');
+    var TO_DISPLAY_STRING = Symbol('toDisplayString');
+    /**
+     * const {xxx} = Vue
+     * 即：从 Vue 中可以被导出的方法，我们这里统一使用  createVNode
+     */
+    var helperNameMap = (_a = {},
+        // 让每一个Symbol对应一个函数
+        _a[CREATE_ELEMENT_VNODE] = 'createElementVNode',
+        _a[CREATE_VNODE] = 'createVNode',
+        _a[TO_DISPLAY_STRING] = 'toDisplayString',
+        _a);
+
     /**
      * 创建 transform 上下文
      */
@@ -2066,6 +2106,9 @@ var Vue = (function (exports) {
             case 0 /* NodeTypes.ROOT */:
                 traverseChildren(node, context);
                 break;
+            case 5 /* NodeTypes.INTERPOLATION */:
+                context.helper(TO_DISPLAY_STRING);
+                break;
         }
         // ---------------- 进入阶段完成 ----------------
         // ---------------- 退出阶段开始 ----------------
@@ -2113,20 +2156,6 @@ var Vue = (function (exports) {
             }
         }
     }
-
-    var _a;
-    var CREATE_ELEMENT_VNODE = Symbol('createElementVNode');
-    // createVNode在vnode.ts中，用于生成一个 VNode 对象，并返回
-    var CREATE_VNODE = Symbol('createVNode');
-    /**
-     * const {xxx} = Vue
-     * 即：从 Vue 中可以被导出的方法，我们这里统一使用  createVNode
-     */
-    var helperNameMap = (_a = {},
-        // 让每一个Symbol对应一个函数
-        _a[CREATE_ELEMENT_VNODE] = 'createElementVNode',
-        _a[CREATE_VNODE] = 'createVNode',
-        _a);
 
     // 辅助函数，用于创建一个 vnodeCall 类型的节点
     function createVNodeCall(context, tag, props, children) {
@@ -2294,6 +2323,11 @@ var Vue = (function (exports) {
     }
     /**
      * 根据 JavaScript AST 生成
+     * 源码中的步骤：
+     * 1. 首先，创建代码生成上下文，里面包含了拼接过程中用到的工具函数。
+     * 2. 然后，根据当前模式决定我们维护的render函数的函数名以及参数。
+     * 3. 之后，根据 AST 中的内容，将对应的代码拼接进上下文context的 code属性 中。
+     * 4. 最后，将拼接好的 render函数，以及初始的 AST 包装成对象，并 return。
      */
     function generate(ast) {
         // 生成上下文 context
@@ -2311,11 +2345,15 @@ var Vue = (function (exports) {
         push("function ".concat(functionName, "(").concat(signature, ") {"));
         // 缩进 + 换行
         indent();
-        //   // 增加 with 触发
-        //   push(`with (_ctx) {`)
-        //   indent()
+        // 增加 with 触发
+        push("with (_ctx) {");
+        indent();
         // 明确使用到的方法。如：createVNode
         var hasHelpers = ast.helpers.length > 0;
+        // 在源码中对 ast.helpers 做了一个判断；它的作用是什么呢？
+        // 实际上，在之前 transform 生成 JavaScript AST 的过程中会去 分析后续需要用到哪些函数，
+        // 并存储在 JavaScript AST 中的 helpers 数组中，
+        // 这样一来只有使用到的函数才会从 Vue 中正常导入，从而减小代码体积。
         if (hasHelpers) {
             push("const { ".concat(ast.helpers.map(aliasHelper).join(', '), " } = _Vue"));
             push("\n");
@@ -2331,9 +2369,9 @@ var Vue = (function (exports) {
         else {
             push("null");
         }
-        //   // with 结尾
-        //   deindent()
-        //   push(`}`)
+        // with 结尾
+        deindent();
+        push("}");
         // 收缩缩进 + 换行
         deindent();
         push("}");
@@ -2354,6 +2392,7 @@ var Vue = (function (exports) {
     }
     /**
      * 区分节点进行处理
+     * genNode 函数做的事情就是 根据 JavaScript AST 中 node 的类型来调用不同的函数进行字符串拼接处理。
      */
     function genNode(node, context) {
         switch (node.type) {
@@ -2367,18 +2406,18 @@ var Vue = (function (exports) {
             case 2 /* NodeTypes.TEXT */:
                 genText(node, context);
                 break;
-            // // 复合表达式处理
-            // case NodeTypes.SIMPLE_EXPRESSION:
-            //   genExpression(node, context)
-            //   break
-            // // 表达式处理
-            // case NodeTypes.INTERPOLATION:
-            //   genInterpolation(node, context)
-            //   break
-            // // {{}} 处理
-            // case NodeTypes.COMPOUND_EXPRESSION:
-            //   genCompoundExpression(node, context)
-            //   break
+            // 复合表达式处理
+            case 4 /* NodeTypes.SIMPLE_EXPRESSION */:
+                genExpression(node, context);
+                break;
+            // 表达式处理
+            case 5 /* NodeTypes.INTERPOLATION */:
+                genInterpolation(node, context);
+                break;
+            // {{}} 处理
+            case 8 /* NodeTypes.COMPOUND_EXPRESSION */:
+                genCompoundExpression(node, context);
+                break;
             // // JS调用表达式的处理
             // case NodeTypes.JS_CALL_EXPRESSION:
             //   genCallExpression(node, context)
@@ -2388,6 +2427,36 @@ var Vue = (function (exports) {
             //   genConditionalExpression(node, context)
             //   break
         }
+    }
+    /**
+     * 复合表达式处理
+     */
+    function genCompoundExpression(node, context) {
+        for (var i = 0; i < node.children.length; i++) {
+            var child = node.children[i];
+            if (isString(child)) {
+                context.push(child);
+            }
+            else {
+                genNode(child, context);
+            }
+        }
+    }
+    /**
+     * 表达式处理
+     */
+    function genExpression(node, context) {
+        var content = node.content, isStatic = node.isStatic;
+        context.push(isStatic ? JSON.stringify(content) : content);
+    }
+    /**
+     * {{}} 处理
+     */
+    function genInterpolation(node, context) {
+        var push = context.push, helper = context.helper;
+        push("".concat(helper(TO_DISPLAY_STRING), "("));
+        genNode(node.content, context);
+        push(")");
     }
     /**
      * 处理 TEXT 节点
@@ -2455,6 +2524,7 @@ var Vue = (function (exports) {
     function baseCompile(template, options) {
         if (options === void 0) { options = {}; }
         var ast = baseParse(template);
+        console.log("baseParse", JSON.stringify(ast));
         transform(ast, extend(options, {
             nodeTransforms: [transformElement, transformText]
         }));
@@ -2485,6 +2555,7 @@ var Vue = (function (exports) {
     exports.reactive = reactive;
     exports.ref = ref;
     exports.render = render;
+    exports.toDisplayString = toDisplayString;
     exports.watch = watch;
 
     Object.defineProperty(exports, '__esModule', { value: true });

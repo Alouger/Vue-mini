@@ -5,7 +5,7 @@ import { createVNode } from "./vnode"
   * 解析 render 函数的返回值
   */
 export function renderComponentRoot(instance) {
-  const { vnode, render, data } = instance
+  const { vnode, render, data = {} } = instance
   let result
 
   try {
@@ -14,7 +14,7 @@ export function renderComponentRoot(instance) {
       // 获取到 result 返回值
       // call()改变this指向, render函数里的this就会指向data
       // 如果 render 中使用了 this，则需要修改 this 指向
-      result = normalizeVNode(render!.call(data))
+      result = normalizeVNode(render!.call(data, data))
     }
   } catch (error) {
     console.error(error)
