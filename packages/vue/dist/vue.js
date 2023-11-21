@@ -2396,10 +2396,12 @@ var Vue = (function (exports) {
      */
     function genNode(node, context) {
         switch (node.type) {
-            // case NodeTypes.ELEMENT:
-            // case NodeTypes.IF:
-            //   genNode(node.codegenNode!, context)
-            //   break
+            case 1 /* NodeTypes.ELEMENT */:
+                genNode(node.codegenNode, context);
+                break;
+            case 9 /* NodeTypes.IF */:
+                genNode(node.codegenNode, context);
+                break;
             case 13 /* NodeTypes.VNODE_CALL */:
                 genVNodeCall(node, context);
                 break;

@@ -139,10 +139,12 @@ function genFunctionPreamble(context) {
  */
 function genNode(node, context) {
   switch (node.type) {
-    // case NodeTypes.ELEMENT:
-    // case NodeTypes.IF:
-    //   genNode(node.codegenNode!, context)
-    //   break
+    case NodeTypes.ELEMENT:
+      genNode(node.codegenNode!, context)
+      break
+    case NodeTypes.IF:
+      genNode(node.codegenNode!, context)
+      break
     case NodeTypes.VNODE_CALL:
       genVNodeCall(node, context)
       break
