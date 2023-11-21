@@ -176,6 +176,10 @@ function parseTag(context: any, type: TagType): any {
   // 对模板进行解析处理
   advanceBy(context, match[0].length)
   console.log(context);
+
+  // 属性与指令处理
+	advanceSpaces(context)
+	let props = parseAttributes(context, type)
   // -- 处理标签结束部分 --
 
   // 判断是否为自关闭标签，例如 <img />
@@ -191,9 +195,158 @@ function parseTag(context: any, type: TagType): any {
     tag,
     tagType,
     // 属性，目前我们没有做任何处理。但是需要添加上，否则，生成的 ats 放到 vue 源码中会抛出错误
-    props: []
+    props
   }
 }
+
+/**
+ * 前进非固定步数
+ */
+function advanceSpaces(context: ParserContext): void {
+  console.log("advanceSpaces - context.source1:", context.source);
+  
+	const match = /^[\t\r\n\f ]+/.exec(context.source)
+
+  console.log("advanceSpaces - match:", match);
+	if (match) {
+		advanceBy(context, match[0].length)
+    console.log("advanceSpaces - advanceBy:", context.source);
+	}
+}
+
+/**
+ * 解析属性与指令
+ */
+function parseAttributes(context, type) {
+	// 解析之后的 props 数组
+	const props: any = []
+	// 属性名称集合，set数据结构可去重
+	const attributeNames = new Set<string>()
+
+	// 循环解析，直到解析到标签结束（'>' || '/>'）为止
+	while (
+		context.source.length > 0 &&
+		!startsWith(context.source, '>') &&
+		!startsWith(context.source, '/>')
+	) {
+		// 具体某一条属性的处理
+		const attr = parseAttribute(context, attributeNames)
+		// 添加属性
+		if (type === TagType.Start) {
+			props.push(attr)
+		}
+		advanceSpaces(context)
+	}
+	return props
+}
+
+/**
+ * 处理指定指令，返回指令节点
+ */
+function parseAttribute(context: ParserContext, nameSet: Set<string>) {
+	// 获取属性名称。例如：v-if
+	const match = /^[^\t\r\n\f />][^\t\r\n\f />=]*/.exec(context.source)!
+  // /^[^\t\r\n\f />][^\t\r\n\f />=]*/.exec('v-on:click="doThis"')  属性名称为 v-on:click
+  // /^[^\t\r\n\f />][^\t\r\n\f />=]*/.exec(':src="imageSrc"') 属性名称为 :src
+  // /^[^\t\r\n\f />][^\t\r\n\f />=]*/.exec('@click="doThis"') 属性名称为 @click
+  // console.log("parseAttribute - match1: ", match);
+  
+	// v-if="isShow"经处理得到属性名称，name = v-if
+  const name = match[0]
+	// 添加当前的处理属性
+	nameSet.add(name)
+  // 消费属性名v-if, 剩下即为="isShow"
+	advanceBy(context, name.length)
+
+	// 获取属性值。
+	let value: any = undefined
+
+	// 解析模板，并拿到对应的属性值节点
+  // /^[\t\r\n\f ]*=/匹配="isShow"开头的等号=
+	if (/^[\t\r\n\f ]*=/.test(context.source)) {
+    // 消费属性名称与等于号之间的空白符 
+		advanceSpaces(context)
+    // 消费等号=，剩下即为"isShow"
+		advanceBy(context, 1)
+		advanceSpaces(context)
+    // 解析属性值，会判断属性值是否被引号(' 或 “) 引用
+		value = parseAttributeValue(context)
+	}
+
+	// 针对 v- 的指令名称处理
+	if (/^(v-[A-Za-z0-9-]|:|\.|@|#)/.test(name)) {
+		// 匹配指令名称(v-xxx)
+		const match =
+			/(?:^v-([a-z0-9-]+))?(?:(?::|^\.|^@|^#)(\[[^\]]+\]|[^\.]+))?(.+)?$/i.exec(
+				name
+			)!
+    // console.log("parseAttribute - match2: ", match);
+		// 指令名。v-if 则获取 if
+		let dirName = match[1]
+		// TODO：指令参数  v-bind:arg
+		// let arg: any
+
+		// TODO：指令修饰符  v-on:click.modifiers
+		// const modifiers = match[3] ? match[3].slice(1).split('.') : []
+
+		return {
+			type: NodeTypes.DIRECTIVE,
+			name: dirName,
+			exp: value && {
+				type: NodeTypes.SIMPLE_EXPRESSION,
+				content: value.content,
+				isStatic: false,
+				loc: value.loc
+			},
+			arg: undefined,
+			modifiers: undefined,
+			loc: {}
+		}
+	}
+
+  // 当前解析的不是指令的话，就进行这个return
+	return {
+		type: NodeTypes.ATTRIBUTE,
+		name,
+		value: value && {
+			type: NodeTypes.TEXT,
+			content: value.content,
+			loc: value.loc
+		},
+		loc: {}
+	}
+}
+
+/**
+ * 获取属性（attr）的 value
+ */
+function parseAttributeValue(context: ParserContext) {
+  // content就是我们得到的属性值
+	let content = ''
+
+	// 判断是单引号还是双引号
+	const quote = context.source[0]
+	const isQuoted = quote === `"` || quote === `'`
+	// 引号处理
+	if (isQuoted) {
+    // 消费引号"，剩下即为isShow"
+		advanceBy(context, 1)
+		// 获取结束的 index
+		const endIndex = context.source.indexOf(quote)
+		// 获取指令的值。例如：v-if="isShow"，则值为 isShow
+		if (endIndex === -1) {
+			content = parseTextData(context, context.source.length)
+		} else {
+      // parseTextData函数里会消费等号isShow，剩下即为一个结尾引号"
+			content = parseTextData(context, endIndex)
+      // 消费结尾引号"，无剩下
+			advanceBy(context, 1)
+		}
+	}
+
+	return { content, isQuoted, loc: {} }
+}
+
 
 /**
  * 解析文本。

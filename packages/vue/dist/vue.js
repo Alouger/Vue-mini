@@ -661,6 +661,12 @@ var Vue = (function (exports) {
     function isSameVNodeType(n1, n2) {
         return n1.type === n2.type && n1.key === n2.key;
     }
+    /**
+     * 创建注释节点
+     */
+    function createCommentVNode(text) {
+        return createVNode(Comment$1, null, text);
+    }
 
     function h(type, propsOrChildren, children) {
         // 获取参数的长度
@@ -1840,7 +1846,7 @@ var Vue = (function (exports) {
      */
     function parseElement(context, ancestors) {
         // -- 先处理开始标签 --
-        var element = parseTag(context);
+        var element = parseTag(context, 0 /* TagType.Start */);
         // 在 parseTag 解析函数执行完毕后，会消费字符串的中的内容<tag>, 比如<div>
         console.log("parseElement context", context);
         console.log("parseElement element", element);
@@ -1856,7 +1862,7 @@ var Vue = (function (exports) {
         element.children = children;
         //  -- 最后处理结束标签 --
         if (startsWithEndTagOpen(context.source, element.tag)) {
-            parseTag(context);
+            parseTag(context, 1 /* TagType.End */);
         }
         // 整个标签处理完成
         return element;
@@ -1881,6 +1887,9 @@ var Vue = (function (exports) {
         // 对模板进行解析处理
         advanceBy(context, match[0].length);
         console.log(context);
+        // 属性与指令处理
+        advanceSpaces(context);
+        var props = parseAttributes(context, type);
         // -- 处理标签结束部分 --
         // 判断是否为自关闭标签，例如 <img />
         var isSelfClosing = startsWith(context.source, '/>');
@@ -1894,8 +1903,136 @@ var Vue = (function (exports) {
             tag: tag,
             tagType: tagType,
             // 属性，目前我们没有做任何处理。但是需要添加上，否则，生成的 ats 放到 vue 源码中会抛出错误
-            props: []
+            props: props
         };
+    }
+    /**
+     * 前进非固定步数
+     */
+    function advanceSpaces(context) {
+        console.log("advanceSpaces - context.source1:", context.source);
+        var match = /^[\t\r\n\f ]+/.exec(context.source);
+        console.log("advanceSpaces - match:", match);
+        if (match) {
+            advanceBy(context, match[0].length);
+            console.log("advanceSpaces - advanceBy:", context.source);
+        }
+    }
+    /**
+     * 解析属性与指令
+     */
+    function parseAttributes(context, type) {
+        // 解析之后的 props 数组
+        var props = [];
+        // 属性名称集合，set数据结构可去重
+        var attributeNames = new Set();
+        // 循环解析，直到解析到标签结束（'>' || '/>'）为止
+        while (context.source.length > 0 &&
+            !startsWith(context.source, '>') &&
+            !startsWith(context.source, '/>')) {
+            // 具体某一条属性的处理
+            var attr = parseAttribute(context, attributeNames);
+            // 添加属性
+            if (type === 0 /* TagType.Start */) {
+                props.push(attr);
+            }
+            advanceSpaces(context);
+        }
+        return props;
+    }
+    /**
+     * 处理指定指令，返回指令节点
+     */
+    function parseAttribute(context, nameSet) {
+        // 获取属性名称。例如：v-if
+        var match = /^[^\t\r\n\f />][^\t\r\n\f />=]*/.exec(context.source);
+        // /^[^\t\r\n\f />][^\t\r\n\f />=]*/.exec('v-on:click="doThis"')  属性名称为 v-on:click
+        // /^[^\t\r\n\f />][^\t\r\n\f />=]*/.exec(':src="imageSrc"') 属性名称为 :src
+        // /^[^\t\r\n\f />][^\t\r\n\f />=]*/.exec('@click="doThis"') 属性名称为 @click
+        // console.log("parseAttribute - match1: ", match);
+        // v-if="isShow"经处理得到属性名称，name = v-if
+        var name = match[0];
+        // 添加当前的处理属性
+        nameSet.add(name);
+        // 消费属性名v-if, 剩下即为="isShow"
+        advanceBy(context, name.length);
+        // 获取属性值。
+        var value = undefined;
+        // 解析模板，并拿到对应的属性值节点
+        // /^[\t\r\n\f ]*=/匹配="isShow"开头的等号=
+        if (/^[\t\r\n\f ]*=/.test(context.source)) {
+            // 消费属性名称与等于号之间的空白符 
+            advanceSpaces(context);
+            // 消费等号=，剩下即为"isShow"
+            advanceBy(context, 1);
+            advanceSpaces(context);
+            // 解析属性值，会判断属性值是否被引号(' 或 “) 引用
+            value = parseAttributeValue(context);
+        }
+        // 针对 v- 的指令名称处理
+        if (/^(v-[A-Za-z0-9-]|:|\.|@|#)/.test(name)) {
+            // 匹配指令名称(v-xxx)
+            var match_1 = /(?:^v-([a-z0-9-]+))?(?:(?::|^\.|^@|^#)(\[[^\]]+\]|[^\.]+))?(.+)?$/i.exec(name);
+            // console.log("parseAttribute - match2: ", match);
+            // 指令名。v-if 则获取 if
+            var dirName = match_1[1];
+            // TODO：指令参数  v-bind:arg
+            // let arg: any
+            // TODO：指令修饰符  v-on:click.modifiers
+            // const modifiers = match[3] ? match[3].slice(1).split('.') : []
+            return {
+                type: 7 /* NodeTypes.DIRECTIVE */,
+                name: dirName,
+                exp: value && {
+                    type: 4 /* NodeTypes.SIMPLE_EXPRESSION */,
+                    content: value.content,
+                    isStatic: false,
+                    loc: value.loc
+                },
+                arg: undefined,
+                modifiers: undefined,
+                loc: {}
+            };
+        }
+        // 当前解析的不是指令的话，就进行这个return
+        return {
+            type: 6 /* NodeTypes.ATTRIBUTE */,
+            name: name,
+            value: value && {
+                type: 2 /* NodeTypes.TEXT */,
+                content: value.content,
+                loc: value.loc
+            },
+            loc: {}
+        };
+    }
+    /**
+     * 获取属性（attr）的 value
+     */
+    function parseAttributeValue(context) {
+        // content就是我们得到的属性值
+        var content = '';
+        // 判断是单引号还是双引号
+        var quote = context.source[0];
+        var isQuoted = quote === "\"" || quote === "'";
+        // 引号处理
+        if (isQuoted) {
+            // 消费引号"，剩下即为isShow"
+            advanceBy(context, 1);
+            // 获取结束的 index
+            var endIndex = context.source.indexOf(quote);
+            // 获取指令的值。例如：v-if="isShow"，则值为 isShow
+            if (endIndex === -1) {
+                content = parseTextData(context, context.source.length);
+            }
+            else {
+                // parseTextData函数里会消费等号isShow，剩下即为一个结尾引号"
+                content = parseTextData(context, endIndex);
+                // 消费结尾引号"，无剩下
+                advanceBy(context, 1);
+            }
+        }
+        return { content: content, isQuoted: isQuoted, loc: {} };
     }
     /**
      * 解析文本。
@@ -2021,6 +2158,7 @@ var Vue = (function (exports) {
     // createVNode在vnode.ts中，用于生成一个 VNode 对象，并返回
     var CREATE_VNODE = Symbol('createVNode');
     var TO_DISPLAY_STRING = Symbol('toDisplayString');
+    var CREATE_COMMENT = Symbol('createCommentVNode');
     /**
      * const {xxx} = Vue
      * 即：从 Vue 中可以被导出的方法，我们这里统一使用  createVNode
@@ -2030,6 +2168,7 @@ var Vue = (function (exports) {
         _a[CREATE_ELEMENT_VNODE] = 'createElementVNode',
         _a[CREATE_VNODE] = 'createVNode',
         _a[TO_DISPLAY_STRING] = 'toDisplayString',
+        _a[CREATE_COMMENT] = 'createCommentVNode',
         _a);
 
     /**
@@ -2049,6 +2188,9 @@ var Vue = (function (exports) {
                 var count = context.helpers.get(name) || 0;
                 context.helpers.set(name, count + 1);
                 return name;
+            },
+            replaceNode: function (node) {
+                context.parent.children[context.childIndex] = context.currentNode = node;
             }
         };
         return context;
@@ -2096,18 +2238,37 @@ var Vue = (function (exports) {
             // nodeTransforms[i](node, context)执行好后返回里面的闭包函数
             var onExit = nodeTransforms[i_1](node, context);
             if (onExit) {
-                exitFns.push(onExit);
+                // exitFns.push(onExit)
+                if (isArray(onExit)) {
+                    exitFns.push.apply(exitFns, __spreadArray([], __read(onExit), false));
+                }
+                else {
+                    exitFns.push(onExit);
+                }
+            }
+            // 因为之前我们写了个replaceNode，它会切换currentNode，所以我们在这要校准下currentNode是否存在
+            if (!context.currentNode) {
+                return;
+            }
+            else {
+                node = context.currentNode;
             }
         }
         // 我们所有的节点都有对应的子节点，我们不可能只处理父节点，不去处理子节点
         // 继续转化子节点
         switch (node.type) {
+            case 10 /* NodeTypes.IF_BRANCH */:
             case 1 /* NodeTypes.ELEMENT */:
             case 0 /* NodeTypes.ROOT */:
                 traverseChildren(node, context);
                 break;
             case 5 /* NodeTypes.INTERPOLATION */:
                 context.helper(TO_DISPLAY_STRING);
+                break;
+            case 9 /* NodeTypes.IF */:
+                for (var i_2 = 0; i_2 < node.branches.length; i_2++) {
+                    traverseNode(node.branches[i_2], context);
+                }
                 break;
         }
         // ---------------- 进入阶段完成 ----------------
@@ -2156,6 +2317,46 @@ var Vue = (function (exports) {
             }
         }
     }
+    /**
+     * 针对于指令的处理
+     * @param name 正则。匹配具体的指令
+     * @param fn 指令的具体处理方法，通常为闭包函数
+     * @returns 返回一个闭包函数
+     */
+    function createStructuralDirectiveTransform(name, fn) {
+        // 如果name是string的话，就把n和name进行比对，不是string的话，就用test方法读取n值
+        var matches = isString(name)
+            ? function (n) { return n === name; }
+            : function (n) { return name.test(n); };
+        return function (node, context) {
+            if (node.type === 1 /* NodeTypes.ELEMENT */) {
+                var props = node.props;
+                // 结构的转换与 v-slot 无关
+                // if (node.tagType === ElementTypes.TEMPLATE && props.some(isVSlot)) {
+                //   return
+                // }
+                // 存储转化函数的数组
+                var exitFns = [];
+                // 遍历所有的 props
+                for (var i = 0; i < props.length; i++) {
+                    var prop = props[i];
+                    // 仅处理指令，并且该指令要匹配指定的正则
+                    if (prop.type === 7 /* NodeTypes.DIRECTIVE */ && matches(prop.name)) {
+                        // 删除结构指令以避免无限递归
+                        props.splice(i, 1);
+                        i--;
+                        // 利用该函数传进来的第二个参数fn生成对应的一个闭包函数放到onExit里，fn 会返回具体的指令函数
+                        var onExit = fn(node, prop, context);
+                        // 存储到数组中
+                        if (onExit)
+                            exitFns.push(onExit);
+                    }
+                }
+                // 返回包含所有函数的数组
+                return exitFns;
+            }
+        };
+    }
 
     // 辅助函数，用于创建一个 vnodeCall 类型的节点
     function createVNodeCall(context, tag, props, children) {
@@ -2172,6 +2373,31 @@ var Vue = (function (exports) {
             tag: tag,
             props: props,
             children: children
+        };
+    }
+    /**
+     * 创建条件表达式的节点
+     */
+    function createConditionalExpression(test, consequent, alternate, newline) {
+        if (newline === void 0) { newline = true; }
+        return {
+            type: 19 /* NodeTypes.JS_CONDITIONAL_EXPRESSION */,
+            test: test,
+            consequent: consequent,
+            alternate: alternate,
+            newline: newline,
+            loc: []
+        };
+    }
+    /**
+     * 创建调用表达式的节点
+     */
+    function createCallExpression(callee, args) {
+        return {
+            type: 14 /* NodeTypes.JS_CALL_EXPRESSION */,
+            loc: {},
+            callee: callee,
+            arguments: args
         };
     }
 
@@ -2397,8 +2623,6 @@ var Vue = (function (exports) {
     function genNode(node, context) {
         switch (node.type) {
             case 1 /* NodeTypes.ELEMENT */:
-                genNode(node.codegenNode, context);
-                break;
             case 9 /* NodeTypes.IF */:
                 genNode(node.codegenNode, context);
                 break;
@@ -2420,15 +2644,73 @@ var Vue = (function (exports) {
             case 8 /* NodeTypes.COMPOUND_EXPRESSION */:
                 genCompoundExpression(node, context);
                 break;
-            // // JS调用表达式的处理
-            // case NodeTypes.JS_CALL_EXPRESSION:
-            //   genCallExpression(node, context)
-            //   break
+            // JS调用表达式的处理
+            case 14 /* NodeTypes.JS_CALL_EXPRESSION */:
+                genCallExpression(node, context);
+                break;
             // // JS条件表达式的处理
-            // case NodeTypes.JS_CONDITIONAL_EXPRESSION:
-            //   genConditionalExpression(node, context)
-            //   break
+            case 19 /* NodeTypes.JS_CONDITIONAL_EXPRESSION */:
+                genConditionalExpression(node, context);
+                break;
         }
+    }
+    /**
+     * JS调用表达式的处理
+     */
+    function genCallExpression(node, context) {
+        var push = context.push, helper = context.helper;
+        var callee = isString(node.callee) ? node.callee : helper(node.callee);
+        push(callee + "(", node);
+        genNodeList(node.arguments, context);
+        push(")");
+    }
+    /**
+     * JS条件表达式的处理。
+     * 例如：
+     *  isShow
+            ? _createElementVNode("h1", null, ["你好，世界"])
+            : _createCommentVNode("v-if", true),
+     */
+    function genConditionalExpression(node, context) {
+        var test = node.test, consequent = node.consequent, alternate = node.alternate, needNewline = node.newline;
+        var push = context.push, indent = context.indent, deindent = context.deindent, newline = context.newline;
+        if (test.type === 4 /* NodeTypes.SIMPLE_EXPRESSION */) {
+            // 写入变量
+            genExpression(test, context);
+        }
+        // 换行
+        needNewline && indent();
+        // 缩进++
+        context.indentLevel++;
+        // 写入空格
+        needNewline || push(" ");
+        // 写入 ？
+        push("? ");
+        // debugger
+        // 写入满足条件的处理逻辑
+        genNode(consequent, context);
+        // 缩进 --
+        context.indentLevel--;
+        // 换行
+        needNewline && newline();
+        // 写入空格
+        needNewline || push(" ");
+        // 写入:
+        push(": ");
+        // 判断 else 的类型是否也为 JS_CONDITIONAL_EXPRESSION
+        var isNested = alternate.type === 19 /* NodeTypes.JS_CONDITIONAL_EXPRESSION */;
+        // 不是则缩进++
+        if (!isNested) {
+            context.indentLevel++;
+        }
+        // 写入 else （不满足条件）的处理逻辑
+        genNode(alternate, context);
+        // 缩进--
+        if (!isNested) {
+            context.indentLevel--;
+        }
+        // 控制缩进 + 换行
+        needNewline && deindent(true /* without newline */);
     }
     /**
      * 复合表达式处理
@@ -2523,12 +2805,85 @@ var Vue = (function (exports) {
         return args.slice(0, i + 1).map(function (arg) { return arg || "null"; });
     }
 
+    /**
+     * transformIf === exitFns。内部保存了所有 v-if、v-else、else-if 的处理函数
+     */
+    var transformIf = createStructuralDirectiveTransform(/^(if|else|else-if)$/, function (node, dir, context) {
+        // processIf的第四个参数是一个回调函数 processCodegen，该回调函数的目的是给ifNode增加codeGen属性
+        return processIf(node, dir, context, function (ifNode, branch, isRoot) {
+            // TODO: 目前无需处理兄弟节点情况
+            var key = 0;
+            // 退出回调。当所有子节点都已完成时，完成codegenNode
+            return function () {
+                if (isRoot) {
+                    ifNode.codegenNode = createCodegenNodeForBranch(branch, key, context);
+                }
+            };
+        });
+    });
+    /**
+     * v-if 的转化处理
+     * processIf的返回值是最终createStructuralDirectiveTransform中onExit的值
+     */
+    function processIf(node, dir, context, processCodegen) {
+        // 仅处理 v-if
+        if (dir.name === 'if') {
+            // 创建 branch 属性
+            var branch = createIfBranch(node, dir);
+            // 生成 if 指令节点，包含 branches
+            var ifNode = {
+                type: 9 /* NodeTypes.IF */,
+                loc: node.loc,
+                branches: [branch]
+            };
+            // 切换 currentVNode，即：当前处理节点为 ifNode
+            context.replaceNode(ifNode);
+            // 生成对应的 codegen 属性
+            if (processCodegen) {
+                return processCodegen(ifNode, branch, true);
+            }
+        }
+    }
+    /**
+     * 创建 if 指令的 branch 属性节点
+     */
+    function createIfBranch(node, dir) {
+        return {
+            type: 10 /* NodeTypes.IF_BRANCH */,
+            loc: node.loc,
+            condition: dir.exp,
+            children: [node]
+        };
+    }
+    /**
+     * 生成分支节点的 codegenNode
+     */
+    function createCodegenNodeForBranch(branch, keyIndex, context) {
+        if (branch.condition) {
+            return createConditionalExpression(branch.condition, createChildrenCodegenNode(branch), 
+            // 以注释的形式展示 v-if.
+            createCallExpression(context.helper(CREATE_COMMENT), ['"v-if"', 'true']));
+        }
+        else {
+            return createChildrenCodegenNode(branch);
+        }
+    }
+    /**
+     * 创建指定子节点的 codegen 节点
+     */
+    function createChildrenCodegenNode(branch, keyIndex) {
+        var children = branch.children;
+        var firstChild = children[0];
+        var ret = firstChild.codegenNode;
+        return ret;
+    }
+
     function baseCompile(template, options) {
         if (options === void 0) { options = {}; }
         var ast = baseParse(template);
         console.log("baseParse", JSON.stringify(ast));
         transform(ast, extend(options, {
-            nodeTransforms: [transformElement, transformText]
+            nodeTransforms: [transformElement, transformText, transformIf]
         }));
         console.log(ast);
         console.log(JSON.stringify(ast));
@@ -2550,6 +2905,7 @@ var Vue = (function (exports) {
     exports.Text = Text$1;
     exports.compile = compileToFunction;
     exports.computed = computed;
+    exports.createCommentVNode = createCommentVNode;
     exports.createElementVNode = createVNode;
     exports.effect = effect;
     exports.h = h;

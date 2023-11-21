@@ -1,4 +1,5 @@
-import { NodeTypes } from './ast'
+import { isArray, isString } from '@vue/shared'
+import { ElementTypes, NodeTypes } from './ast'
 import { isSingleElementRoot } from './hoistStatic'
 import { TO_DISPLAY_STRING } from './runtimeHelpers'
 
@@ -33,6 +34,7 @@ export interface TransformContext {
    * 转化方法集合
    */
   nodeTransforms: any[]
+  replaceNode(node): void
 }
 /**
  * 创建 transform 上下文
@@ -50,6 +52,9 @@ export function createTransformContext(root, { nodeTransforms = [] }) {
       const count = context.helpers.get(name) || 0
       context.helpers.set(name, count + 1)
       return name
+    },
+    replaceNode(node) {
+      context.parent!.children[context.childIndex] = context.currentNode = node
     }
   }
   return context
@@ -100,18 +105,36 @@ export function traverseNode(node, context: TransformContext) {
     // nodeTransforms[i](node, context)执行好后返回里面的闭包函数
     const onExit = nodeTransforms[i](node, context)
     if (onExit) {
-      exitFns.push(onExit)
+      // exitFns.push(onExit)
+      if (isArray(onExit)) {
+        exitFns.push(...onExit)
+      } else {
+        exitFns.push(onExit)
+      }
+    }
+
+    // 因为之前我们写了个replaceNode，它会切换currentNode，所以我们在这要校准下currentNode是否存在
+    if (!context.currentNode) {
+      return
+    } else {
+      node = context.currentNode
     }
   }
   // 我们所有的节点都有对应的子节点，我们不可能只处理父节点，不去处理子节点
   // 继续转化子节点
   switch (node.type) {
+    case NodeTypes.IF_BRANCH:
     case NodeTypes.ELEMENT:
     case NodeTypes.ROOT:
       traverseChildren(node, context)
       break
     case NodeTypes.INTERPOLATION:
       context.helper(TO_DISPLAY_STRING)
+      break
+    case NodeTypes.IF:
+      for (let i = 0; i < node.branches.length; i++) {
+        traverseNode(node.branches[i], context)
+      }
       break
   }
   
@@ -165,3 +188,45 @@ function createRootCodegen(root) {
       }
     }
   }
+
+/**
+ * 针对于指令的处理
+ * @param name 正则。匹配具体的指令
+ * @param fn 指令的具体处理方法，通常为闭包函数
+ * @returns 返回一个闭包函数
+ */
+export function createStructuralDirectiveTransform(name: string | RegExp, fn) {
+  // 如果name是string的话，就把n和name进行比对，不是string的话，就用test方法读取n值
+  const matches = isString(name)
+    ? (n: string) => n === name
+    : (n: string) => name.test(n)
+
+  return (node, context) => {
+    if (node.type === NodeTypes.ELEMENT) {
+      const { props } = node
+      // 结构的转换与 v-slot 无关
+      // if (node.tagType === ElementTypes.TEMPLATE && props.some(isVSlot)) {
+      //   return
+      // }
+
+      // 存储转化函数的数组
+      const exitFns: any = []
+      // 遍历所有的 props
+      for (let i = 0; i < props.length; i++) {
+        const prop = props[i]
+        // 仅处理指令，并且该指令要匹配指定的正则
+        if (prop.type === NodeTypes.DIRECTIVE && matches(prop.name)) {
+          // 删除结构指令以避免无限递归
+          props.splice(i, 1)
+          i--
+          // 利用该函数传进来的第二个参数fn生成对应的一个闭包函数放到onExit里，fn 会返回具体的指令函数
+          const onExit = fn(node, prop, context)
+          // 存储到数组中
+          if (onExit) exitFns.push(onExit)
+        }
+      }
+      // 返回包含所有函数的数组
+      return exitFns
+    }
+  }
+}
